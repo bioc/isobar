@@ -93,10 +93,12 @@ setClass("TMT6plexSpectra",
 .valid.IBSpectra.slots <- function(object) {
     n <- length(object@reporterTagNames)
     if (length(object@reporterTagMasses) != n) 
-        stop("[IBSpectra: validation] Slot reportMasses [",length(object@reporterTagMasses),"] has different length then reporterTagNames [",n,"]!")
+        stop("[IBSpectra: validation] Slot reportMasses [",length(object@reporterTagMasses),"]",
+             " has different length then reporterTagNames [",n,"]!")
     if (!all(dim(object@isotopeImpurities) == n))
-        stop("[IBSpectra: validation] isotopeImpurities has dimensions ",paste(dim(object@isotopeImpurities),collapse="x"),
-             "! Expected is ",n,"x",n,".")
+        stop("[IBSpectra: validation] isotopeImpurities has dimensions ",
+             paste(dim(object@isotopeImpurities),collapse="x"),"!",
+             " Expected is ",n,"x",n,".")
     
     return(TRUE)
 }
@@ -206,8 +208,23 @@ setMethod("initialize","IBSpectra",
 
           ##data <- data[data[,SC['SPECTRUM']] %in% data.sc[,SC['SPECTRUM']],]
         }
-        data.sc <- unique(data[,SC])
         
+        ## Merge identifications (of same search engine)
+        ## TODO: PSMs for proteins which have been seen in onyl one samples are discarded!
+        if ('SCORE' %in% names(SC)) {
+        data$spm <-
+          as.numeric(as.factor(apply(data[,c(.PROTEIN.COLS['PROTEINAC'],
+                                             SC[c('SPECTRUM','PEPTIDE','MODIFSTRING')])],
+                                     1,paste,collapse="-")))
+        data  <- ddply(data,"spm",function(d) {
+          if (nrow(d)==1) return(d)
+          res <- d[which.max(d$score),,drop=FALSE]
+          res$score <- paste(d[,SC['SCORE']],collapse="|")
+          return(res)
+        })
+        }
+        
+        data.sc <- unique(data[,SC])
         # Check for divergent identifications of spectra
         if (any(duplicated(data.sc[,SC['SPECTRUM']]))) {
           dupl.spectra <- .get.dupl.n.warn(data.sc,SC['SPECTRUM'])
@@ -341,11 +358,50 @@ setGeneric("readIBSpectra", function(type,id.file,peaklist.file,...)
            standardGeneric("readIBSpectra"))
 setMethod("readIBSpectra",
           signature(type="character",id.file="character",peaklist.file="missing"),
-    function(type,id.file,...) {   
-      new(type,data=read.table(id.file,header=T,sep="\t"),...
+    function(type,id.file,...) {
+      new(type,data=do.call(rbind,lapply(id.file,read.table,header=T,sep="\t")),...
       )
     }
 )
+
+## TODO: log is not returned
+.read.idfile <- function(id.file,id.format=NULL,decode.titles=TRUE,log=NULL) {
+  data <- unique(do.call("rbind",lapply(id.file,function(f) {
+    
+    if (is.null(id.format)) {
+      if (grepl(".mzid$",f,ignore.case=TRUE)) 
+        id.format.f <- "mzid"
+      else if (grepl(".ibspectra.csv$",f,ignore.case=TRUE) ||
+               grepl(".id.csv$",f,ignore.case=TRUE))
+        id.format.f <- "ibspectra.csv"
+      else
+        stop(paste("cannot parse file ",f," - cannot deduce format based on extenstion (it is not ibspectra.csv, id.csv or mzid). Please provide id.format to readIBSpectra",sep=""))          
+    } else {
+      id.format.f <- id.format
+    }
+    
+    if (id.format.f == "ibspectra.csv") {
+      data <- read.table(f,header=T,stringsAsFactors=F,sep="\t")
+      log <- rbind(log,c("identification file [id.csv]",f))
+    } else { 
+      if (id.format.f == "mzid") {
+        data <- read.mzid(f)
+        log <- rbind(log,c("identification file [mzid]",f))
+      } else {
+        stop(paste("cannot parse file ",f," - format [",id.format.f,"] not known.",sep=""))
+      }
+    }
+    return(data)
+  })
+  ))
+  if (decode.titles) {
+    data[,.SPECTRUM.COLS['SPECTRUM']] <- unlist(lapply(data[,.SPECTRUM.COLS['SPECTRUM']],URLdecode))
+  }
+  data[,.SPECTRUM.COLS['SPECTRUM']] <- .trim(data[,.SPECTRUM.COLS['SPECTRUM']])
+  return(data)
+
+}
+
 ##' readIBSpectra - read IBSpectra object from files
 ##'
 ##' <details>
@@ -373,46 +429,18 @@ setMethod("readIBSpectra",
 ##' @author Florian P Breitwieser
 setMethod("readIBSpectra",
           signature(type="character",id.file="character",peaklist.file="character"),
-    function(type,id.file,peaklist.file,proteinGroupTemplate=NULL,
-             mapping.file=NULL,mapping=c(peaklist=1,id=2),
+    function(type,id.file,peaklist.file,
+             proteinGroupTemplate=NULL,
+             mapping.file=NULL,mapping=c(peaklist="even",id="odd"),
              mapping.file.readopts=list(header=TRUE,stringsAsFactors=FALSE,sep=","),
+             id.file.domap=NULL,
              peaklist.format=NULL,id.format=NULL,fragment.precision=NULL,fragment.outlier.prob=NULL,
-             revert.titles=FALSE,scan.lines=0) {
+             decode.titles=TRUE,scan.lines=0) {
       
       log <- data.frame(key=c(),message=c())
 
-      # get identified spectra
-      data <- unique(do.call("rbind",lapply(id.file,function(f) {
-        id.format.f <- id.format
-        if (is.null(id.format.f)) {
-          if (grepl(".mzid$",f,ignore.case=TRUE)) 
-            id.format.f <- "mzid"
-          else if (grepl(".ibspectra.csv$",f,ignore.case=TRUE) ||
-                   grepl(".id.csv$",f,ignore.case=TRUE))
-            id.format.f <- "ibspectra.csv"
-          else
-            stop(paste("cannot parse file ",f," - cannot deduce format (no ibspectra.csv, id.csv or mzid extension). Please provide id.format to readIBSpectra",sep=""))          
-        }
-
-        if (id.format.f == "ibspectra.csv") {
-          data <- read.table(f,header=T,stringsAsFactors=F,sep="\t")
-          log <- rbind(log,c("identification file [id.csv]",f))
-        } else { 
-          if (id.format.f == "mzid") {
-            data <- read.mzid(f)
-            log <- rbind(log,c("identification file [mzid]",f))
-          } else {
-          stop(paste("cannot parse file ",f," - format [",id.format.f,"] not known.",sep=""))
-          }
-        }
-        return(data)
-        })
-      ))
-
-      if (revert.titles) {
-        data[,.SPECTRUM.COLS['SPECTRUM']] <- .escape.url(data[,.SPECTRUM.COLS['SPECTRUM']],FALSE)
-      }
-      data[,.SPECTRUM.COLS['SPECTRUM']] <- .trim(data[,.SPECTRUM.COLS['SPECTRUM']])
+      ## get identified spectra
+      data <- .read.idfile(id.file,id.format,decode.titles=decode.titles,log)
 
       ## mapping
       mapping.quant2id <- data.frame()
@@ -422,14 +450,24 @@ setMethod("readIBSpectra",
           stop("readIBSpectra/mapping must be a named vector with the",
                " names peaklist and id.")
         }
-        mapping.file.readopts$X <- mapping.file
-        mapping.file.readopts$FUN <- read.table
-        
-        mapping.quant2id <- do.call(rbind,do.call(lapply,mapping.file.readopts))
+
+        res <- lapply(mapping.file,function(f) {
+          mapping.file.readopts$file <- f
+          do.call(read.table,mapping.file.readopts)
+          })
+        mapping.quant2id <- do.call(rbind,res)
         cn <-  colnames(mapping.quant2id)
+        ## TODO: Add warning if mapping is not in colnames
         colnames(mapping.quant2id)[cn == mapping['id']] <- 'id'
         colnames(mapping.quant2id)[cn == mapping['peaklist']] <- 'peaklist'
         log <- rbind(log,data.frame(rep("mapping file",length(mapping.file)),mapping.file,stringsAsFactors=FALSE))
+        if (!is.null(id.file.domap)) {
+          data.m <- .read.idfile(id.file.domap,id.format,decode.titles=decode.titles,log)
+          map.spectrum <- mapping.quant2id[,"id"]
+          names(map.spectrum) <- mapping.quant2id[,"peaklist"]
+          data.m[,"spectrum"] <- map.spectrum[data.m[,"spectrum"]]
+          data <- rbind(data,data.m)
+        }
       }
       
       # all identified spectrum titles
@@ -731,7 +769,8 @@ read.mzid <- function(f) {
   
   if (!is.null(spectra)) {
     ## filtering to take only spectra defined in spectra
-    all.titles <- .trim(sapply(strsplit(grep("TITLE",input,value=T),"="),function(x) x[2] ))
+    ## all.titles <- .trim(sapply(strsplit(grep("TITLE",input,value=T),"="),function(x) x[2] )) # not efficient
+    all.titles <- .trim(substring(grep("^TITLE=",x,value=TRUE),7))
     if (length(all.titles) != nrow(bnd)) {
       # sanity check that each spectrum has a title
       stop("title not specified for all spectra!");
@@ -762,11 +801,11 @@ read.mzid <- function(f) {
   
   ## extract information from each spectrum
   result <- do.call(rbind,lapply(all.spectra,function(x) {
-    header <- do.call(rbind,strsplit(x,"="))
+    header <- .strsplit_vector(x[grep("^[A-Z]",x)],"=")
     numbers <- do.call(rbind,strsplit(x[grep("^1..\\.",x)],"\\s"))
     mzi.mass <- as.numeric(numbers[,1])
     
-    rr <- c(title=header[header[,1]=="TITLE",2])
+    rr <- c(title=header["TITLE"])
     
     sel <- mzi.mass > min.mass & mzi.mass < max.mass
     if (any(sel)) {
@@ -881,7 +920,7 @@ setAs("IBSpectra","data.frame.concise",
 
       # return in order
       res[order(res[,.PROTEIN.COLS['PROTEINAC_CONCISE']],res[,.SPECTRUM.COLS['PEPTIDE']]),
-          c(intersect(c(.PROTEIN.COLS,.PEPTIDE.COLS,.SPECTRUM.COLS),colnames(res)),
+          c(intersect(c(.PROTEIN.COLS,.PEPTIDE.COLS,"n.groups","n.acs","n.variants",.SPECTRUM.COLS),colnames(res)),
             colnames(rm),colnames(ri))]
     }
 )
@@ -1035,8 +1074,9 @@ setMethod("spectrumSel",signature(x="IBSpectra",peptide="character",protein="mis
 )
 
 setMethod("spectrumSel",signature(x="IBSpectra",peptide="missing",protein="character"),
-    function(x,protein,specificity=REPORTERSPECIFIC,modif=NULL,spectrum.titles=FALSE) {
-      peptides <- peptides(x=proteinGroup(x),protein=protein,specificity=specificity,do.warn=FALSE)
+    function(x,protein,specificity=REPORTERSPECIFIC,modif=NULL,spectrum.titles=FALSE,...) {
+      
+      peptides <- peptides(x=proteinGroup(x),protein=protein,specificity=specificity,do.warn=FALSE,...)
       if (length(peptides) == 0)
         return(FALSE)
       sel <- spectrumSel(x,peptide=peptides,spectrum.titles=spectrum.titles,modif=modif)
@@ -1056,10 +1096,21 @@ setMethod("spectrumTitles","IBSpectra",function(x,...)
 setGeneric("classLabels", function(x) standardGeneric("classLabels"))
 setGeneric("classLabels<-", function(x,value) standardGeneric("classLabels<-"))
 
-setMethod("classLabels",signature(x="IBSpectra"), function(x) phenoData(x)[["class.labels"]])
+setMethod("classLabels",signature(x="IBSpectra"), 
+    function(x) {
+      class.labels <- phenoData(x)[["class.labels"]]
+      names(class.labels) <- phenoData(x)[["class.label.description"]]
+      return(class.labels)
+    }
+)
 setReplaceMethod("classLabels","IBSpectra",
     function(x,value) {
-      phenoData(x)[["class.labels",labelDescription="class labels"]] <- value
+      if (is.null(names(value))) {
+        phenoData(x)[["class.labels",labelDescription="class labels"]] <- value
+      } else {
+        phenoData(x)[["class.labels",labelDescription="class labels"]] <- as.character(value)
+        phenoData(x)[["class.label.description",labelDescription="class label descriptions"]] <- names(value)
+      }
       x
     }
 )
@@ -1070,9 +1121,12 @@ setReplaceMethod("classLabels","IBSpectra",
 ### substractAdditiveNoise and exclude methods.
 ###
 
-setGeneric("correctIsotopeImpurities", function(x) standardGeneric("correctIsotopeImpurities") )
-setGeneric("subtractAdditiveNoise", function(x,...) standardGeneric("subtractAdditiveNoise") )
-setGeneric("exclude",function(x,protein,peptide=NULL,...) standardGeneric("exclude"))
+setGeneric("correctIsotopeImpurities",
+           function(x) standardGeneric("correctIsotopeImpurities") )
+setGeneric("subtractAdditiveNoise",
+           function(x,...) standardGeneric("subtractAdditiveNoise") )
+setGeneric("exclude",
+           function(x,protein,peptide=NULL,...) standardGeneric("exclude"))
 
 setMethod("correctIsotopeImpurities",signature(x="IBSpectra"),
     function(x) {
@@ -1102,83 +1156,102 @@ setMethod("correctIsotopeImpurities",signature(x="IBSpectra"),
       return(x)
     }
 )
+
 normalize <- function(x,f=median,target="intensity",exclude.protein=NULL,
-                      use.protein=NULL,f.doapply=TRUE,log=TRUE,...){
-
-      ## NOTE: median normalizes too much - mean or colSums better?
-      ##       reason: NAs which are not taken into account by median
-
-      if (!is.logged(x,"isotopeImpurities.corrected")) {
-        warning("Isotope impurity correction has not been logged",
-                " - data might be uncorrected. See ?correctIsotopeImpurities.");
-      }
-      if (is.logged(x,"is.normalized")) {
-        warning("Normalization is logged already.");
-      }
-
-       if (!is.null(exclude.protein) & !is.null(use.protein))
-         stop("Provide either exclude.protein or use.protein, not both.")
- 
-       # NA rows are removed as they are considered unreliable
-       ri <- reporterIntensities(x,na.rm=FALSE)
-       
-       if (!is.null(exclude.protein))
-         ri <- ri[!spectrumSel(x,protein=exclude.protein,
-                               specificity=c(REPORTERSPECIFIC,GROUPSPECIFIC,UNSPECIFIC)),]
-
-       if (!is.null(use.protein))
-         ri <- ri[spectrumSel(x,protein=use.protein,specificity=REPORTERSPECIFIC),]
+                      use.protein=NULL,f.doapply=TRUE,log=TRUE,
+                      channels=NULL,na.rm=FALSE,...){
   
-       ## TODO: warning when ri is empty
-       
-       if (target=="ratio") {
-         rs <- rowSums(ri,na.rm=T)
-         if (log)
-          ri <- apply(ri,2,function(x) x/rs)
-         else
-           ri <- apply(ri,2,function(x) x-rs)
-       } else if (target=="intensity") {
-         # take ri as specified
-       } else {
-         stop(paste("target",target,"not known"))
-       }
- 
-       if (!f.doapply)
-         res <- f(ri,na.rm=TRUE,...)
-       else
-         res <- apply(ri,2,f,na.rm=TRUE,...)
+  ## NOTE: median normalizes might normalize too much when a lot of NA
+  ##         values are present - mean or colSums better?
+  
+  if (!is.logged(x,"isotopeImpurities.corrected")) 
+    warning("Isotope impurity correction has not been logged",
+            " - data might be uncorrected. See ?correctIsotopeImpurities.")
 
-       factor <- max(res,na.rm=T)/res
+  ##if (is.logged(x,"is.normalized"))
+  ##  warning("Normalization is logged already.")
+  
+  if (!is.null(exclude.protein) & !is.null(use.protein))
+    stop("Provide either exclude.protein or use.protein, not both.")
 
-       x <- do.log(x,"is.normalized",TRUE)
-# FIXME: function for f does not work
-#       x <- do.log(x,"normalization.method",
-#              sprintf("%s of %s",as.character(substitute(f)),target))
-       for (i in seq_along(factor)) {
-         x <- do.log(x,paste("normalization.multiplicative.factor channel",
-                             colnames(ri)[i]),
-                       round(factor[i],4))
-       }
+  ri <- reporterIntensities(x,na.rm=na.rm)
 
-       # save original reporter intensities for noise estimation
-       orig.ri <- reporterIntensities(x)
-	   assayDataElement(x,"ions_not_normalized") <- orig.ri
+  if (!is.null(channels) ) {
+    if (is.list(channels)) {
+      for (channels.set in channels)
+        x <- normalize(x,f=f,target=target,exclude.protein=exclude.protein,
+                       use.protein=use.protein,f.doapply=f.doapply,
+                       log=log,channels=channels.set,na.rm=na.rm,...)
+      return(x)
+    } else {
+      if (!all(channels %in% colnames(ri)))
+        stop("channels must be reporterTagNames.")
+                                                         
+      ri <- ri[,channels,drop=FALSE]
+    }
+  } ## if !is.null(channels)
+  
+  if (!is.null(exclude.protein))
+    ri <- ri[!spectrumSel(x,protein=exclude.protein,
+                          specificity=c(REPORTERSPECIFIC,GROUPSPECIFIC,UNSPECIFIC)),]
+  
+  if (!is.null(use.protein))
+    ri <- ri[spectrumSel(x,protein=use.protein,specificity=REPORTERSPECIFIC),]
+  
+  ## TODO: warning when ri is empty
+  
+  if (target=="ratio") {
+    rs <- rowSums(ri,na.rm=T)
+    if (log)
+      ri <- apply(ri,2,function(x) x/rs)
+    else
+      ri <- apply(ri,2,function(x) x-rs)
+  } else if (target=="intensity") {
+    ## take ri as specified
+  } else {
+    stop(paste("target",target,"not known"))
+  }
+  
+  if (!f.doapply)
+    res <- f(ri,na.rm=TRUE,...)
+  else
+    res <- apply(ri,2,f,na.rm=TRUE,...)
+  
+  factor <- max(res,na.rm=T)/res
+  
+  x <- do.log(x,"is.normalized",TRUE)
+  ## FIXME: function for f does not work
+  ##       x <- do.log(x,"normalization.method",
+  ##              sprintf("%s of %s",as.character(substitute(f)),target))
+  for (i in seq_along(factor)) {
+    x <- do.log(x,paste("normalization.multiplicative.factor channel",
+                        colnames(ri)[i]),
+                round(factor[i],4))
+  }
+  
+  ## save original reporter intensities for noise estimation
+  if (is.null(assayDataElement(x,"ions_not_normalized")))
+    assayDataElement(x,"ions_not_normalized") <- reporterIntensities(x)
+  
+  reporterIntensities(x)[,colnames(ri)] <- 
+    reporterIntensities(x)[,colnames(ri)]*
+      rep(factor,each=nrow(reporterIntensities(x)))
+  
+  x
+}
 
-       reporterIntensities(x) <- 
-         reporterIntensities(x)*rep(factor,each=nrow(reporterIntensities(x)))
-
-       x
-     }
+setGeneric("normalize")
 
 
+## Estimates the noise level througth the 1st percentile of the >0
+## signals (in the linear space) Method quantile: It take's the prob
+## (0.01) quantile to estimate the noise level.  This value is
+## subtracted from all intensities, and all remaining intensities have
+## to be at least that value.
 
-# Estimates the noise level througth the 1st percentile of the >0 signals (in the linear space)
-# Method quantile: It take's the prob (0.01) quantile to estimate the noise level.
-#  This value is subtracted from all intensities, and all remaining intensities have to be at least that value.
-
-# If channels are assumed similar in intensity and hence a shared noise level is 
-# reasonable 
-# If not, then one level per channel is necessary
+## If channels are assumed similar in intensity and hence a shared
+## noise level is reasonable If not, then one level per channel is
+## necessary
 setMethod("subtractAdditiveNoise",signature(x="IBSpectra"),
     function(x,method="quantile",shared=TRUE,prob=0.01) {
       if (method=="quantile") {
@@ -1285,6 +1358,9 @@ setMethod("reporterMassPrecision",
           signature=c(x="IBSpectra",plot="missing"),
           function(x) reporterMassPrecision(x,TRUE))
 
+
+setGeneric("reporterIntensityPlot",function(x) standardGeneric("reporterIntensityPlot"))
+
 # Calculates and displays the deviation from the 'true' tag mass 
 # - as specified in the IBSpectra object - of each channel.
 setMethod("reporterMassPrecision",
@@ -1309,14 +1385,45 @@ setMethod("reporterMassPrecision",
               
               ggplot(melt.masses,aes(x=mass)) + geom_vline(xintercept=0,alpha=0.8) +
                 geom_histogram(fill="white",aes(colour=factor(reporter)),alpha=0.8,
-                               binwidth=1/30*(max(melt.masses$mass,na.rm=TRUE)-min(melt.masses$mass,na.rm=TRUE))) + 
-                  facet_wrap(~reporter,scales="fixed") + theme_bw() +
+                               binwidth=1/20*(max(melt.masses$mass,na.rm=TRUE)-min(melt.masses$mass,na.rm=TRUE))) + 
+                  facet_wrap(~reporter,scales="fixed",nrow=1) + 
+                  theme_bw() +
                     opts(legend.position="none",
-                         axis.text.x = theme_text(angle=330,hjust=0,colour="grey50"))
+                         axis.text.x = theme_text(angle=330,hjust=0,vjust=1,colour="grey50",size=6.5))
             }
 
             #return(summary(masses-matrix(reporterTagMasses(x),byrow=T,
             #       nrow=nrow(masses),ncol=ncol(masses))))
+          }
+)
+
+setMethod("reporterIntensityPlot",
+          signature=c(x="IBSpectra"),function(x) {
+            intensities <- reporterIntensities(x)
+            intensities.nn <- reporterData(x,element="ions_not_normalized") # null if not normalized
+            
+            melt.intensities <- data.frame(tag=rep(colnames(intensities),each=nrow(intensities)),
+                       normalized=ifelse(is.null(intensities.nn),"no","2. after normalization"),
+                       intensity=as.numeric(intensities),
+                       stringsAsFactors=FALSE)
+
+            if (!is.null(intensities.nn)) {
+            	melt.intensities <- rbind(melt.intensities,
+              	  data.frame(tag=rep(colnames(intensities.nn),each=nrow(intensities.nn)),
+                             normalized="1. before normalization",
+                             intensity=as.numeric(intensities.nn),
+                             stringsAsFactors=FALSE))
+            }
+            
+       #     ggplot(melt.intensities,aes(x=intensity)) + 
+       #       geom_density(aes(fill=factor(normalized)),alph=0.5) + 
+       #       scale_x_log10() + facet_wrap(~tag,scales="fixed",nrow=1) + 
+       #           theme_bw() + opts(axis.text.x = theme_text(angle=330,hjust=0,colour="grey50"))
+                            
+            ggplot(melt.intensities,aes(x=tag,y=intensity)) +
+              geom_boxplot(aes(color=factor(normalized)),size=0.5,alpha=0.6,
+                           outlier.size=0.5,position=position_dodge(width=0.25)) + 
+              scale_y_log10() + theme_bw() + scale_color_hue("") 
           }
 )
 
@@ -1367,9 +1474,9 @@ setMethod("plotRatio",
 )
 
 maplot.protein <- function(x,relative.to,protein,noise.model=NULL,
-        channels=NULL,ylim=c(0.01,100),identify=FALSE,add=FALSE,pchs=NULL,
+        channels=NULL,ylim=NULL,identify=FALSE,add=FALSE,pchs=NULL,log="xy",
         legend.pos="topright",names=NULL,legend.cex=0.8,cols=pchs,ltys=NULL,
-        main=protein,xlab="average intensity",ylab="ratio",...) {
+        main=protein,xlab="average intensity",ylab="ratio",type="ma",...) {
       
       i.df <- data.frame()
       legend <- list(text=c(),lty=c(),pch=c())
@@ -1381,17 +1488,13 @@ maplot.protein <- function(x,relative.to,protein,noise.model=NULL,
 
       for (ib in x) {
       
-      ions <- reporterIntensities(ib,na.rm=FALSE,protein=protein)
-      ions[which(is.na(ions))] <- 0
+        ions <- reporterIntensities(ib,na.rm=FALSE,protein=protein)
+        ions[which(is.na(ions))] <- 0
             
       for (channel_i in seq_along(channels)) {
         channel <- channels[channel_i]
         channel.rt <- ifelse(length(relative.to) == 1,relative.to,relative.to[channel_i])
-        
-        div <- ions[,channel]/ions[,channel.rt]
-        avg <- (ions[,channel]+ions[,channel.rt])/2
-        
-        if (length(div)>0) {
+         if (length(ions[,channel])>0) {
           if (is.null(names))
             legend$text <- c(legend$text,sprintf("%s/%s",channel,channel.rt))
           else
@@ -1400,22 +1503,29 @@ maplot.protein <- function(x,relative.to,protein,noise.model=NULL,
           legend$lty <- c(legend$pch,ltys[i])
         }
         
-        div[div == Inf] = 100
-        div[div == -Inf] = 0.01
-        
-        if (identify) {
-          i.df <- rbind(i.df,data.frame(x=avg,y=div,spectrum=rownames(ions),
-              peptide=peptides(x=ib,spectrum=rownames(ions)),stringsAsFactors=T))
+        if (type=="ma") {
+          div <- ions[,channel]/ions[,channel.rt]
+          avg <- (ions[,channel]+ions[,channel.rt])/2
+          div[div == Inf] = 100
+          div[div == -Inf] = 0.01
+          x <- avg
+          y <- div
+        } else {
+          x <- ions[,channel]
+          y <- ions[,channel.rt]
         }
-        
+       
         if (channel_i == 1 && add == FALSE) 
-          plot(avg,div,ylim=ylim,pch=pchs[i],log="xy",main=main,col=cols[i],
+          plot(x,y,ylim=ylim,pch=pchs[i],log=log,main=main,col=cols[i],
                xlab=xlab,ylab=ylab,...)
         else
-          points(avg,div,pch=pchs[i],col=cols[i],...)
+          points(x,y,pch=pchs[i],col=cols[i],...)
         
         add = TRUE
-        
+        if (identify)
+          i.df <- rbind(i.df,data.frame(x=x,y=y,spectrum=rownames(ions),
+                  peptide=peptides(x=ib,spectrum=rownames(ions)),stringsAsFactors=T))
+
         if (!is.null(noise.model)) {
           ratio <- estimateRatio(ib,noise.model,channel.rt,channel,protein=protein)
           abline(h=10^ratio[1],lty=ltys[i],col=cols[i],...)
@@ -1482,10 +1592,13 @@ setMethod("protGgdata",
 setMethod("maplot",
           signature(x="IBSpectra",channel1="character",channel2="character"),
           function(x,channel1,channel2,noise.model=NULL,colorize.protein=NULL,
-              h=NULL,v=NULL,col.h="green",col.v="green",ylab=paste("ratio channel",channel1,"vs",channel2),
+              h=NULL,v=NULL,col.h="green",col.v="green",
+              ylab=paste("ratio channel",channel1,"vs",channel2),
               pch=".",noise.model.col=c("#E41A1C","#377EB8","#4DAF4A","#984EA3","#FF7F00","#FFFF33","#A65628","#F781BF","#999999"),
-              pch.p=1,protein=NULL,peptide=NULL,smooth=FALSE,set.na.to=NULL,
-              na.rm=is.null(set.na.to),identify=FALSE,identify.column="spectrum",
+              pch.p=1,protein=NULL,peptide=NULL,smooth=FALSE,
+              set.na.to=NULL,set.na.to.lim=NULL,na.rm=is.null(set.na.to),
+              identify=FALSE,identify.column="spectrum",
+              x.axis.labels=TRUE,y.axis.labels=TRUE,
               col="black",...) {
             if (is.null(protein)) 
               ions <- reporterIntensities(x,na.rm=FALSE)
@@ -1530,9 +1643,14 @@ setMethod("maplot",
             M <- R/G
             A <- log10(sqrt(R*G))
             
+
+            if (isTRUE(set.na.to)) {
+              set.na.to <- ceiling(10^(max(abs(log10(M)), na.rm = TRUE)+0.2))
+              set.na.to.lim <- ceiling(10^(max(abs(log10(M)), na.rm = TRUE)+0.1))
+            }
             if (!is.null(set.na.to)) {
               sel <- is.na(R);
-              M[sel] <- set.na.to;
+              M[sel] <- set.na.to + 1;
               A[sel] <- log10(G[sel])
               sel <- is.na(G); 
               M[sel] <- 1/set.na.to
@@ -1551,7 +1669,22 @@ setMethod("maplot",
             } else {
               plot(A,M,pch=pch,log="y",
                   xlab=expression(paste(log[10]," average intensity")),
-                  ylab=ylab,col=col,...)
+                  ylab=ylab,col=col,axes=FALSE,...)
+              axis(side=1,labels=x.axis.labels)
+
+              if (!is.null(set.na.to)) {
+                y.axis <- axTicks(2,log=TRUE)
+                y.axis <- y.axis[y.axis >= 1/set.na.to.lim & y.axis <= set.na.to.lim]
+                y.axis <- y.axis[seq(from=2,to=length(y.axis)-1)]
+                if (isTRUE(y.axis.labels))
+                  y.axis.labels <- c(-Inf,y.axis,Inf)
+                axis(side=2,at=c(1/set.na.to.lim,y.axis,set.na.to.lim),
+                     labels= y.axis.labels)
+                abline(h = c(1/set.na.to.lim,set.na.to.lim), col = "blue", lty = 3)
+              } else {
+                axis(side=2,labels=y.axis.labels)
+              }
+
             }
             if (!is.null(h)) {
               sel <- M > h | M < 1/h
@@ -1657,30 +1790,44 @@ setMethod("maplot",
           function(x,noise.model=NULL,pairs=TRUE,xlim="fixed",ylim="fixed",...){
             ions <- reporterIntensities(x)
             if (pairs) {
+              set.na.to <- NULL
+              set.na.to.lim <- NULL
               if (identical(xlim,"fixed")) 
                 xlim <- log10(range(ions,na.rm=T)) 
               if (identical(ylim,"fixed")) {
                 y.max <- max(apply(ions,1,function(x) {
                                    y <- x[!is.na(x)]
-                                   if (length(y) < 2)
-                                     NA
-                                   else
-                                     max(y)/min(y)
+                                   if (length(y) < 2) NA
+                                   else max(y)/min(y)
                                    }),na.rm=T)
+                set.na.to <- ceiling(10^(log10(y.max)+0.2))
+                set.na.to.lim <- ceiling(10^(log10(y.max)+0.1))
+                y.max <- ceiling(10^(log10(y.max)+0.3))
                 ylim <- c(1/y.max,y.max)
+
               }
-              par(mfrow=c(ncol(ions),ncol(ions)),mar=c(2.5,2,0.75,1),
+              histlimits=log10(range(ions,na.rm=TRUE))
+              par(mfrow=c(ncol(ions),ncol(ions)),mar=c(2.5,2,0,1),
                   bty="n",fg="darkgray")
               for (i in colnames(ions)) {
                 for (j in colnames(ions)) {
-                  if (i == j) { plot(1,1,type="n",xaxt="n",yaxt="n",bty="n"); text(1,1,i,col="black",cex=1.2); }
-                  else if (i > j) {
+                  if (i == j) { 
+                    hist(log10(ions[,i]), col="#EEEEEE", freq=FALSE, 
+                         xlim=histlimits,cex=0.5,
+                         bty="n", xaxt="n", yaxt="n", main="",ylim=c(0,1))
+                    text(sum(histlimits)/2,0.5,i,col="black",cex=1.4,font=2); 
+
+                  } else if (i > j) {
+                    plot.labels = i == tail(colnames(ions),1) && j == head(colnames(ions),1)
                     maplot(x=x,channel1=as.character(i),channel2=as.character(j),
-                           noise.model=noise.model,xlim=xlim,ylim=ylim,...)
+                           noise.model=noise.model,xlim=xlim,ylim=ylim,
+                           set.na.to=set.na.to,set.na.to.lim=set.na.to.lim,
+                           x.axis.labels= plot.labels,
+                           y.axis.labels= plot.labels,
+                           ...)
                     
                   }
                   else if (i < j) {
-                    # TODO: add some info (correlation, ...)
                     plot(c(0,1),c(0,1),type="n",ylab="",xlab="",xaxt="n",yaxt="n",bty="n")
                   }
                         

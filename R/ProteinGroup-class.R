@@ -64,43 +64,45 @@ setMethod("ProteinGroup",signature(from="data.frame",template="ProteinGroup",pro
           function(from,template,proteinInfo) {      
       # TODO: exclude groups from beeing reporters when
       #       there's no reporter-specific peptide ?
-      # TODO: might not work ATM
+      # TODO: add isoformToGeneProduct
       if (ncol(from) == 3) {
           colnames(from) <- c("spectrum","peptide","protein")
       }
       if (ncol(from) == 4) {
           colnames(from) <- c("spectrum","peptide","startpos","protein")
       }
-      peptideNProtein <-
-        subset(data.frame(peptideNProtein(template),stringsAsFactors=F),
-               peptide %in% from[,'peptide'])
+      peptideNProtein <- peptideNProtein(template)[peptideNProtein(template)[,"peptide"] %in% from[,'peptide'],]
       protein.group.table <-
         subset(proteinGroupTable(template),protein.g %in% peptideNProtein[,"protein.g"])
-      indistinguishableProteins <-
-        subset(data.frame(indistinguishableProteins(template),stringsAsFactors=F),
-               protein %in% from[,"protein.group"])
+      ipt <- indistinguishableProteins(template)
+      indistinguishableProteins <- ipt[ipt %in% peptideNProtein[,"protein.g"]]
       peptideSpecificity <-
-        subset(data.frame(peptideSpecificity(template)),peptide %in% from[,"peptide"])
+        subset(peptideSpecificity(template),peptide %in% from[,"peptide"])
       spectrumToPeptide <- spectrumToPeptide(template)[
                      names(spectrumToPeptide(template)) %in% from[,"spectrum"]]
       
-     # TODO: overlappingProteins are missing
+      isoforms <-template@isoformToGeneProduct[names(indistinguishableProteins),]
+      peptideInfo <- subset(template@peptideInfo, peptide %in% from[,'peptide'])
+      ## TODO: overlappingProteins are missing
 
       return(
           new("ProteinGroup",
-              peptideNProtein = as.matrix(peptideNProtein),
-              peptideSpecificity = as.matrix(peptideSpecificity),
+              peptideNProtein = peptideNProtein,
+              peptideSpecificity = peptideSpecificity,
               proteinGroupTable = protein.group.table,
-              indistinguishableProteins = as.matrix(indistinguishableProteins),
+              indistinguishableProteins = indistinguishableProteins,
               spectrumToPeptide = spectrumToPeptide,
-              proteinInfo = proteinInfo)
-      )      
+              isoformToGeneProduct = isoforms,
+              proteinInfo = proteinInfo,
+              peptideInfo = peptideInfo)
+      )
     }
 )
 
-readProteinGroup <- function(id.file) {
+readProteinGroup <- function(id.file,...) {
   # TODO: check if this works
-pp <- read.table(id.file,header=T,stringsAsFactors=FALSE,sep="\t")
+  pp <- do.call(rbind,lapply(id.file,function(id.f)
+                read.table(id.f,header=T,stringsAsFactors=FALSE,sep="\t")))
 #mzident <- lapply(id.file,read.table,header=T,stringsAsFactors=FALSE,sep="\t")
 # si <- do.call(rbind,lapply(mzident,function(x) x$spectrum.identifications))
 # rownames(si) <- NULL
@@ -115,7 +117,7 @@ pp <- read.table(id.file,header=T,stringsAsFactors=FALSE,sep="\t")
            .PEPTIDE.COLS['STARTPOS'],
            .PROTEIN.COLS['PROTEINAC'])]
   
-  return(ProteinGroup(from=pp))
+  return(ProteinGroup(from=pp,...))
 }
 
 setMethod("ProteinGroup",signature(from="data.frame",template="NULL",proteinInfo="ANY"),
@@ -228,14 +230,14 @@ setMethod("ProteinGroup",signature(from="data.frame",template="missing",proteinI
                    pep.n.prots,by.x="protein.g",by.y="protein.g")
       
       peptideSpecificity <- .factor.as.character(ddply(tmp,"peptide",function(d) {
-            data.frame(specificity=
-                    ifelse(length(unique(d[,"protein.g"]))==1,REPORTERSPECIFIC,
-                    ifelse(length(unique(d[,"reporter.protein"]))==1,GROUPSPECIFIC,
-                    UNSPECIFIC)),
-                       n.shared.proteins=length(unique(d[,"protein.g"])),
-                       n.shared.groups=length(unique(d[,"reporter.protein"])),
-              stringsAsFactors=FALSE)
-          }
+        data.frame(specificity=
+                   ifelse(length(unique(d[,"protein.g"]))==1,REPORTERSPECIFIC,
+                          ifelse(length(unique(d[,"reporter.protein"]))==1,GROUPSPECIFIC,
+                                 UNSPECIFIC)),
+                   n.shared.proteins=length(unique(d[,"protein.g"])),
+                   n.shared.groups=length(unique(d[,"reporter.protein"])),
+                   stringsAsFactors=FALSE)
+      }
       ))
 
       # isoforms (handled for Uniprot only, ATM)
@@ -312,21 +314,68 @@ setMethod("ProteinGroup",signature(from="data.frame",template="missing",proteinI
 getProteinInfoFromBiomart <- function(x,database="Uniprot") {
   protein.acs <- x@isoformToGeneProduct[names(indistinguishableProteins(x)),"proteinac.wo.splicevariant"]
 
-  proteinInfo <- data.frame(accession=c(),name=c(),protein_name=c(),
+  protein.info <- data.frame(accession=c(),name=c(),protein_name=c(),
                             gene_name=c(),organism=c())
   if (database == "Uniprot") {
     #require(biomaRt)
     tryCatch({
-      mart <- biomaRt::useMart("unimart",dataset="uniprot",
+      mart <- biomaRt::useMart("uniprot_mart",dataset="UNIPROT",
                       host="www.ebi.ac.uk",path="/uniprot/biomart/martservice")
-    proteinInfo <- biomaRt::getBM(attributes=c("accession","name","protein_name","gene_name","organism"),
+    protein.info <- biomaRt::getBM(attributes=c("accession","name","protein_name","gene_name","organism"),
           filter='accession',values=protein.acs,mart=mart)
     },error=function(e) warning("could not set Biomart"))
 
   } else {
     stop(sprintf("getProteinInfo for database %s not defined.",database))
   }
-  return(proteinInfo)
+  protein.info$gene_name[!is.na(protein.info$gene_name) & protein.info$gene_name == ""] <- NA
+
+  return(protein.info)
+}
+
+
+getProteinInfoFromUniprot <- function(x,splice.by=200) {
+  fields <- c(accession="id",name="entry%20name",protein_name="protein%20names",
+              gene_name="genes",organism="organism",
+              length="length",sequence="sequence")
+   
+  protein.acs <- x@isoformToGeneProduct[names(indistinguishableProteins(x)),"proteinac.wo.splicevariant"]
+  protein.info <- c()
+  i <- 1
+  while (i < length(protein.acs)) {
+    url <- paste("http://www.uniprot.org/uniprot/?query=",
+                 paste("accession:",protein.acs[seq(from=i,to=min(length(protein.acs),i+splice.by-1))],collapse="+OR+",sep=""),
+                 "&format=tab&compress=no&columns=",
+                 paste(fields,collapse=","),sep="")
+    protein.info <- rbind(protein.info,read.delim(url,stringsAsFactors=FALSE))
+    i <- i + splice.by
+  }
+  colnames(protein.info) <- names(fields)
+  protein.info$protein_name <- sapply(strsplit(protein.info$protein_name," (",fixed=TRUE),function(x) x[1])
+  protein.info$gene_name <- sapply(strsplit(protein.info$gene_name," "),function(x) x[1])
+  protein.info$sequence <- gsub(" ","",protein.info$sequence)
+  return(protein.info)
+}
+
+getProteinInfoFromBioDb <- function(x,con=NULL,...) {
+  if (is.null(con)) {
+    con <- dbConnect(...)
+    do.disconnect <- TRUE
+  } else {
+    do.disconnect <- FALSE
+  }
+
+  protein.acs <- x@isoformToGeneProduct[names(indistinguishableProteins(x)),"proteinac.wo.splicevariant"]
+  query <- paste("SELECT primaryac AS accession,id AS name,",
+                 "  description AS protein_name,",
+                 "  (SELECT g.genename FROM genenames g WHERE g.entryid=d.entryid AND g.synonym=FALSE AND g.sourcedb=3 LIMIT 1) AS gene_name,",
+                 "  os AS organism, seqlength as length, sequence",
+                 "FROM dbentries d ",
+                 "WHERE dbid IN (2,3) AND primaryac IN (",paste("'",protein.acs,"'",collapse=",",sep=""),")")
+  res <- dbGetQuery(con,query)
+  if (do.disconnect)
+    dbDisconnect(con)
+  return(res)
 }
 
 
@@ -355,12 +404,35 @@ setAs("ProteinGroup","data.frame",function(from) {
   return(spectrum.to.protein.w.peptideinfo[,c("spectrum","peptide","start.pos","protein")])
 })
 
+## Export a /concise/ data.frame which is peptide centric:
+##  - for each peptide there is one line only
+##  - column proteins concatenates all the different protein/protein group ACs
+##    - indistinguishable peptides are separated by ',', protein groups by ';'
+##  - column n.groups: number of groups a peptide appears
+##  - column n.acs: number of acs a peptide appears in (without splice variant!)
+##      counts double if the same ACs are in different groups 
+##  - column n.variants: number of acs a peptide appears in (with splice variant!)
 setAs("ProteinGroup","data.frame.concise",
-      function(from) {        
-        res <- ddply(as.data.frame(peptideNProtein(from),stringsAsFactors=FALSE),"peptide",
-                     function(x) paste(x[,"protein.g"],collapse=";"))
-        colnames(res) <- c("peptide","proteins")
-        return(res)
+      function(from) {
+        ip.df <- .vector.as.data.frame(indistinguishableProteins(from),
+                                       colnames=c("protein","protein.g"))
+        
+        ip.df <-merge(ip.df,from@isoformToGeneProduct,
+                      by.x="protein",by.y="proteinac.w.splicevariant")
+        pep.n.prot <- as.data.frame(peptideNProtein(from),stringsAsFactors=FALSE)
+        in.df <- unique(ddply(ip.df, "protein.g",
+                        function(x) 
+                          c(n.acs=length(unique(x[,"proteinac.wo.splicevariant"])),
+                            n.variants=length(unique(x[,"protein"])))))
+        pep.n.prot <- merge(pep.n.prot,in.df)
+        res <- ddply(pep.n.prot,"peptide",
+                     function(x)  {
+                       c(proteins=paste(x[,"protein.g"],collapse=";"),
+                         n.groups=nrow(x), 
+                         n.acs=sum(x[,"n.acs"]),
+                         n.variants=sum(x[,"n.variants"]))
+                     })
+        return(unique(res))
       })
 
 
@@ -417,11 +489,22 @@ setMethod("peptides",signature(x="ProteinGroup",protein="missing"),
 setMethod("peptides",signature(x="ProteinGroup",protein="character"),
     function(x,protein,
              specificity=c(UNSPECIFIC,GROUPSPECIFIC,REPORTERSPECIFIC),
-             columns=c('peptide'),set=union,drop=TRUE,do.warn=TRUE) {
+             columns=c('peptide'),set=union,drop=TRUE,
+             groupspecific.if.same.ac=FALSE,do.warn=TRUE) {
 
       pnp <- peptideNProtein(x)
       ps <- peptideSpecificity(x)
 
+      if (groupspecific.if.same.ac) {
+        group.proteins <- subset(proteinGroupTable(x),reporter.protein==protein,"protein.g",drop=TRUE)
+        group.proteins.all <- names(indistinguishableProteins(x,protein=group.proteins))
+        protein.acs <- subset(x@isoformToGeneProduct,
+                              proteinac.w.splicevariant %in% group.proteins.all,
+                              "proteinac.wo.splicevariant",drop=TRUE)
+        if (length(unique(protein.acs)) == 1)
+          specificity <- c(specificity,GROUPSPECIFIC)
+      }
+      
       peptides <- lapply(protein, function(p) pnp[pnp[,"protein.g"] == p,"peptide"])
       peptides <- Reduce(set,peptides)
 
@@ -512,8 +595,14 @@ setMethod("protein.g",signature("ProteinGroup","character","ANY"),
 setGeneric("protein.ac",function(x,protein.g) standardGeneric("protein.ac"))
 setMethod("protein.ac",signature("ProteinGroup","character"),
   function(x,protein.g) {
-   x@isoformToGeneProduct[indistinguishableProteins(x,protein.g=protein.g),"proteinac.wo.splicevariant"]
+   unique(x@isoformToGeneProduct[indistinguishableProteins(x,protein.g=protein.g),"proteinac.wo.splicevariant"])
 }) 
+
+setMethod("protein.ac",signature("ProteinGroup","missing"),
+  function(x) {
+   unique(x@isoformToGeneProduct[,"proteinac.wo.splicevariant"])
+})
+
 
 
 ### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -693,4 +782,175 @@ my.protein.info <- function(x,protein.g) {
          accession=isoforms[protein.acs,"proteinac.wo.splicevariant"],
          splicevariant=as.numeric(isoforms[protein.acs,"splicevariant"])), 
        stringsAsFactors=FALSE), protein.info, all.x=TRUE,all.y=FALSE))
+}
+
+summary.ProteinGroup <- function(object,only.reporters=TRUE,...) {
+  peptide.cnt <- table(peptideNProtein(object)[,"protein.g"])
+  peptide.spectra.cnt <- table(spectrumToPeptide(object))
+  spectra.cnt <- tapply(peptideNProtein(object)[,"peptide"],peptideNProtein(object)[,"protein.g"],function(pep) sum(peptide.spectra.cnt[pep]))
+  
+  if (only.reporters) 
+    proteins <- reporterProteins(object)
+  else
+    proteins <- names(spectra.cnt)
+  
+  proteins <- proteins[order(spectra.cnt[proteins],decreasing=TRUE)]
+    
+  return(data.frame(peptide.cnt=peptide.cnt[proteins],
+                    spectra.cnt=spectra.cnt[proteins]))
+  
+}
+
+### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+### Quantification functions (dNSAF).
+###  based on peptide or spectral count
+
+peptide.count <- function(protein.group,protein.g=reporterProteins(protein.group),
+                          specificity=c("reporter-specific","group-specific","unspecific")) {
+  sapply(protein.g,
+         function(p) length(peptides(protein.group,p,specificity=specificity)))
+}
+
+spectra.count <- function(protein.group,protein.g=reporterProteins(protein.group),
+                          specificity=c("reporter-specific","group-specific","unspecific")) {
+  peptide.spectra.count <- table(spectrumToPeptide(protein.group))
+  ## Calculate unique spectrum counts for all proteins
+  spectra.count <- sapply(protein.g, function(p)
+                 sum(peptide.spectra.count[peptides(protein.group,protein=p,
+                                              specificity=specificity)]))
+  names(spectra.count) <- protein.g
+  return(spectra.count)
+}
+
+calculate.dNSAF <- function(protein.group) {
+  if (is.null(proteinInfo(protein.group)) || length(proteinInfo(protein.group)) == 0)
+    stop("slot proteinInfo not set - it is needed for sequence length")
+  if (!"length" %in% colnames(proteinInfo(protein.group))) {
+    stop("no column 'length' in proteinInfo slot")
+  }
+  seqlength <- proteinInfo(protein.group)$length
+  names(seqlength) <- proteinInfo(protein.group)$accession
+  
+  spectrum.counts <- table(spectrumToPeptide(protein.group))
+  ## Calculate unique spectrum counts for all proteins
+  uspc <- sapply(reporterProteins(protein.group), function(p) 
+                 sum(spectrum.counts[peptides(protein.group,protein=p,
+                                              specificity=c("reporter-specific","group-specific"))]))
+  names(uspc) <- reporterProteins(protein.group)
+  
+  ## Calculate distribution factors for each shared peptide
+  pnp <- peptideNProtein(protein.group)
+  pnp <- pnp[pnp[,"protein.g"] %in% reporterProteins(protein.group),]
+  t <- table(pnp[,"peptide"])
+  shared.peptides <- names(t)[t>1]
+  distr.factors <- lapply(shared.peptides,function(pep) {
+    proteins <- pnp[pnp[,"peptide"]==pep,"protein.g"]
+    uspc.p <- uspc[proteins]
+    uspc.p/sum(uspc.p)
+  })
+  names(distr.factors) <- shared.peptides
+
+  ## Calculate dSAF
+  dSAF <- sapply(reporterProteins(protein.group), function(p) {
+    shared.pep.p <- peptides(protein.group,protein=p,specificity="unspecific",do.warn=FALSE)
+    if (length(shared.pep.p) > 0)
+      d.sspc <- sum(sapply(shared.pep.p, function(pep) spectrum.counts[pep]*distr.factors[[pep]][p]))
+    else
+      d.sspc <- 0
+
+    ## for protein length, we take the sum of lengths of all acs
+    protein.length <- sum(seqlength[unique(protein.ac(protein.group,p))],na.rm=TRUE)
+    dSAF <- (uspc[p] + d.sspc) / protein.length
+    if (is.nan(dSAF) | !is.finite(dSAF)) dSAF <- NA
+    return(dSAF)
+  })
+
+  ## normalize to dNSAF
+  dNSAF <- dSAF/sum(dSAF,na.rm=TRUE)
+  names(dNSAF) <- reporterProteins(protein.group)
+  return(dNSAF)
+}
+
+## get.seqlength returns amino acid sequence length of Uniprot ACs
+.DEPR.get.seqlength <- function(my.acs,uniprot=NULL,uniprot.acs=NULL) { 
+  if (is.null(uniprot)) {
+    ## Download Uniprot/Swissprot from:
+    ## ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/complete/uniprot_sprot.fasta.gz
+
+    ## Alternative: use ANUC
+    ## choosebank("swissprot")
+    ## cat(banknameSocket$details, sep = "\n")
+
+    #library(seqinr)
+    uniprot <- read.fasta("uniprot_sprot.fasta",seqtype="AA",as.string=TRUE)
+  }
+  if (is.null(uniprot.acs))
+    uniprot.acs <- do.call(rbind,strsplit(names(uniprot),"|",fixed=TRUE))[,2]
+  seqlength <- sapply(uniprot[uniprot.acs %in% my.acs],nchar)
+  names(seqlength) <- uniprot.acs[uniprot.acs %in% my.acs]
+  return(seqlength)
+}
+
+
+.DEPR.n.obs.peptides <- function(seq,nmc=1,min.length=6) {
+  seq.c <- strsplit(seq,"")[[1]]
+  pos <- gregexpr("[KR]",seq,perl=TRUE)[[1]]
+  pos <- pos[seq.c[pos+1] != "P"]
+  pos <- pos[!is.na(pos)]
+  
+  pep <- sapply(seq_along(c(pos,1)),function(i) {
+    idx.from <- ifelse(i == 1,1,pos[i-1] + 1)
+    idx.to <- ifelse(i > length(pos), length(seq.c), pos[i])
+    
+    if (idx.to-idx.from >= min.length)
+      substr(seq,idx.from,idx.to)[[1]]
+    else
+      NA
+  })
+  pep <- pep[!is.na(pep)]
+
+  for (i in seq(len=nmc)) {
+    nmcx <- sapply(seq_along(pos),function(i) {
+      idx.from <- ifelse(i == 1,1,pos[i-1] + 1)
+      idx.to <- ifelse(i == length(pos), length(seq.c), pos[i+1])
+      if (idx.to-idx.from >= min.length)
+        substr(seq,idx.from,idx.to)
+      else
+        NA
+    })
+    pep <- unique(c(pep,nmcx[!is.na(nmcx)]))
+  }
+
+  return(length(pep))
+}
+
+n.observable.peptides <- function(seq,nmc=1,min.length=6,min.mass=800,max.mass=4000,...) {
+  if (is.na(seq) || length(seq)==0 || nchar(seq) == 0)
+    return(0)
+  pep <- Digest(seq,missed=nmc,...)
+  min.length.ok <- nchar(pep[,"peptide"]) >= min.length
+  mass.ok <- pep[,"mz2"] >= min.mass & pep[,"mz3"] <= max.mass
+  #pep[min.length.ok & mass.ok,]
+  return(sum(min.length.ok & mass.ok))
+}
+
+calculate.emPAI <- function(protein.group,protein.g=reporterProteins(protein.group), ...) {
+  require(OrgMassSpecR)
+  if (is.null(proteinInfo(protein.group)) || length(proteinInfo(protein.group)) == 0)
+    stop("slot proteinInfo not set - it is needed for sequence length")
+  if (!"sequence" %in% colnames(proteinInfo(protein.group))) {
+    stop("no column 'sequence' in proteinInfo slot")
+  }
+
+  sequences <- proteinInfo(protein.group)$sequence
+  names(sequences) <- proteinInfo(protein.group)$accession
+ 
+  n.observed.peptides <- table(peptideNProtein(protein.group)[,"protein.g"])[protein.g]
+  n.observable.peptides <- sapply(protein.g,
+       function(protein.g) 
+         do.call(sum,lapply(unique(protein.ac(protein.group,protein.g)),
+             function(protein.ac) n.observable.peptides(sequences[protein.ac])),...)
+  )
+  empai <- 10^(n.observed.peptides/n.observable.peptides) - 1
+  return(empai)
 }

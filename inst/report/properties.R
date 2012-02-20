@@ -1,8 +1,8 @@
 ##
-## Isobar properties.conf file
+## Isobar properties.R file
 ##     for automatic report generation
 ## 
-## It is standard R code and parsed using system.file
+## It is standard R code and parsed using sys.source
 
 ## Isobaric tagging type. Use one of the following:
 # type='iTRAQ4plexSpectra'
@@ -17,6 +17,16 @@ isotope.impurities=NULL
 name=basename(getwd())
 author="isobar R package"
 ibspectra=paste(name,"ibspectra.csv",sep=".")
+
+## When replicates or 'samples belonging together' are analyzed,
+## a ProteinGroup object based on all data should be constructed
+## beforehand. This then acts as a template and a subset is used.
+protein.group.template=NULL
+
+## Via database or internet connection informations on proteins 
+## (such as gene names and length) can be gathered. protein.info.f
+## defines the function which takes a ProteinGroup object as argument
+protein.info.f=getProteinInfoFromUniprot
 
 ## Where should cached files be saved?
 # cachedir="cache"
@@ -44,9 +54,11 @@ readIBSpectra.args = list(
 correct.isotope.impurities=TRUE
 
 normalize=TRUE
+normalize.channels=NULL
 normalize.use.protein=NULL
 normalize.exclude.protein=NULL
 normalize.function=median
+normalize.na.rm=FALSE
 normalize.exclude.set = list (seppro_igy14=c(
         "P02763",   #  Alpha1-Acid Glycoprotein
         "P01009-1", #  Alpha1-Antitrypsin
@@ -93,6 +105,9 @@ combn.method="interclass"
 ## Example for iTRAQ 4plex:
 # class.labels=as.character(c(1,0,0,0))
 # class.labels=c("Treatment","Treatment","Control","Control")
+## Also names are possible - these serves as description in the report
+##  and less space is used in the rows
+# class.labels=c("Treatment"="T","Treatment"="T","Control"="C","Control"="C")
 class.labels=NULL
 combn=NULL
 
@@ -104,13 +119,14 @@ ratios.opts = list(
     sign.level.sample=0.01,
     sign.level.rat=0.01)
 
-quant.w.grouppeptides=c("bcrabl","bcrabl,bcrabl_p185,bcrabl_t315i")
+quant.w.grouppeptides=c("bcrabl","bcrabl,bcrabl_p185,bcrabl_t315i","mgtagzhCorr")
 
 min.detect=NULL
 
 datbase="Uniprot"
 preselected=c()
 
+ratiodistr=NULL
 ratiodistr.summarize=FALSE
 ratiodistr.summarize.method="global"
 

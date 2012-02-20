@@ -49,6 +49,7 @@ get.property <- function(name) { get(name,properties.env,inherits=FALSE) }
 <<echo=FALSE,results=tex>>=
 cat("\\newcommand{\\analysisname}{",sanitize(get.property('name')),"}")
 cat("\\newcommand{\\analysisauthor}{",sanitize(get.property('author')),"}")
+cat(sprintf("\\input{%s}\n",system.file("report","report-utils.tex",package="isobar")))
 @
 
 \newcommand{\rr}{\raggedright}
@@ -76,7 +77,7 @@ cat("\\newcommand{\\analysisauthor}{",sanitize(get.property('author')),"}")
 \bibliography{isobar}
 \bibliographystyle{plain}
 
-\title{Isobaric Tag Analysis Report\\ \analysisname}
+\title{Isobaric Tag Analysis Report\\ \analysisname\isobarthanks}
 \author{\analysisauthor}
 \date{\today}
 \raggedbottom
@@ -94,7 +95,6 @@ bndt <- 5
 bnd <- round(log10(bndt),1)
 cat(sprintf("\\newcommand{\\bnd}{%s}",bnd),"\n")
 cat(sprintf("\\newcommand{\\bndt}{%s}\n",bndt),"\n")
-cat(sprintf("\\input{%s}\n",system.file("report","report-utils.tex",package="isobar")))
 
 cmbn <- t(unique(quant.tbl[,c("r1","r2")]))
 is.single.comparision <- ncol(cmbn) ==1
@@ -117,18 +117,29 @@ if (is.single.comparision) {
 
 <<echo=FALSE,results=tex>>=
 cl <- attr(quant.tbl,"classLabels")
+cl[is.na(cl)] <- ""
 if (!is.null(cl)) {
-  cat("\\begin{tabular}{rr}\n")
-  cat("\\multicolumn{2}{c}{Class Labels} \\bigstrut \\\\ \n")
-  cat("channel & class \\\\ \\hline \\bigstrut[t]\n")
+  if (is.null(names(cl))) {
+    cat("\\begin{tabular}{rp{5cm}}\n")
+    cat("\\multicolumn{2}{c}{Class Labels} \\bigstrut \\\\ \n")
+    cat("channel & class \\\\ \\hline \\bigstrut[t]\n")
+    cl <- paste("\\emph{",cl,"}",sep="")
+  } else {
+    cat("\\begin{tabular}{rrp{3cm}}\n")
+    cat("\\multicolumn{3}{c}{Class Labels} \\bigstrut \\\\ \n")
+    cat("channel & class & description \\\\ \\hline \\bigstrut[t]\n")
+    cl <- paste(paste("\\emph{",cl,"} & "),names(cl),sep="")
+  }
   for (i in seq_along(reporterTagNames(ibspectra))) {
-    cat(reporterTagNames(ibspectra)[i]," & ",ifelse(is.na(cl[i]),"",cl[i]),"\\\\ \n")
+    cat(reporterTagNames(ibspectra)[i]," & ",
+        cl[i],
+        "\\\\ \n")
   }
   cat("\\end{tabular}\n")
 }
 @
 
-\begin{tabular}{rl}
+\begin{tabular}{rp{8cm}}
 \multicolumn{2}{c}{Column Description} \bigstrut  \\
 \emph{protein} & Protein ID.  \\
 \emph{peptides} & Number of peptides protein was identified with. \\
@@ -178,11 +189,11 @@ if (any(quant.tbl$is.significant == 1,na.rm=TRUE)) {
             " & ",sprintf("\\parbox{4cm}{%s}",prot.info$table.name),
             " & ",paste(prot.info$n.reporter,prot.info$n.groupmember,sep="/"),
             " & ",length(reporter.peptides),
-            " & ",n.spectra,
-            " & ",protein.row[1,"n.spectra"])
+            " & ",n.spectra)
         if (!is.single.comparision) {
             cat(" & ",cmbn[1,cmb_i]," & ",cmbn[2,cmb_i])
         }
+            cat(" & ",protein.row[1,"n.spectra"])
             cat(" & ",sprintf("\\textbf{%.2f}",10^protein.row[1,"lratio"]),sep=" ")
         cat(" & ",draw.boxplot(protein.row[1,'lratio'],
                                protein.row[1,'sd'],bnd))
