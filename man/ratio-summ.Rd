@@ -19,7 +19,7 @@
   variability within and over cases.
 }
 \usage{
-proteinRatios(ibspectra, noise.model, reporterTagNames = NULL, proteins = reporterProteins(proteinGroup(ibspectra)), peptide = NULL, cl = classLabels(ibspectra), method = "global", symmetry = FALSE, summarize = FALSE, summarize.method = "mult.pval", min.detect = NULL, strict.sample.pval = TRUE, strict.ratio.pval = TRUE, orient.div = 0, sign.level = 0.05, sign.level.rat = sign.level, sign.level.sample = sign.level, ratiodistr = NULL, variance.function = "maxi", combine=FALSE,
+proteinRatios(ibspectra, noise.model, reporterTagNames = NULL, proteins = reporterProteins(proteinGroup(ibspectra)), peptide = NULL, cl = classLabels(ibspectra), combn.method = "global", symmetry = FALSE, summarize = FALSE, summarize.method = "mult.pval", min.detect = NULL, strict.sample.pval = TRUE, strict.ratio.pval = TRUE, orient.div = 0, sign.level = 0.05, sign.level.rat = sign.level, sign.level.sample = sign.level, ratiodistr = NULL, variance.function = "maxi", combine=FALSE,
 p.adjust = NULL, reverse=FALSE, combn=NULL, ...)
 
 combn.matrix(x, method = "global", cl = NULL, vs = NULL)
@@ -43,10 +43,12 @@ summarize.ratios(ratios, summarize.method, min.detect, n.combination, strict.sam
   \item{peptide}{peptides for which ratios are calculated.}
   \item{modif}{Modification.}
   \item{cl}{Class labels. See also ?classLabels. }
-  \item{vs}{Class label or reporter tag name. When \code{method} is "versus.class", 
+  \item{vs}{Class label or reporter tag name. When \code{combn.method} is "versus.class", 
             all combinations against class \code{vs} are computed, 
-            when \code{method} is "verus.channel", all combinations 
+            when \code{combn.method} is "verus.channel", all combinations 
             against channel \code{vs}.}
+  \item{combn.method}{"global", "interclass", or "intra-class". Defines which ratios
+     are computed, based on class labels cl}
   \item{method}{"global", "interclass", or "intra-class". Defines which ratios
      are computed, based on class labels cl}
   \item{symmetry}{If true, reports also the inverse ratio}
@@ -69,7 +71,7 @@ summarize.ratios(ratios, summarize.method, min.detect, n.combination, strict.sam
   \item{combine}{If true, a single ratio for all proteins and peptides, resp., is calculated. See \code{\link{estimateRatio}}.}
   \item{p.adjust}{Set to one of p.adjust.methods to adjust ratio p-values for multiple comparisions. See \code{\link{p.adjust}}.}
   \item{reverse}{reverse}
-  \item{n.combination}{numbero fo combinations possible}
+  \item{n.combination}{number of combinations possible}
 }
 \value{
 'data.frame':	11 variables:
@@ -102,6 +104,6 @@ data(ibspiked_set1)
 data(noise.model.hcd)
 
 ceru.proteins <- c("P13635","Q61147")
-proteinRatios(ibspiked_set1,noise.model=noise.model.hcd,proteins=ceru.proteins,cl=c("T","T","C","C"),method="interclass",summarize=TRUE)
+proteinRatios(ibspiked_set1,noise.model=noise.model.hcd,proteins=ceru.proteins,cl=c("T","T","C","C"),combn.method="interclass",summarize=TRUE)
 
 }

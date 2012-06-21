@@ -1,5 +1,28 @@
 if(!isGeneric("as.data.frame")) setGeneric("as.data.frame", useAsDefault=as.data.frame)
 
+# for R version pre 2.14
+#if (!exists("paste0")) # will show a warning on newer R versions
+  paste0 <- function(...,sep="") paste(...,sep=sep)
+
+"%inrange%" <- function(a,b) {
+  if (!is.numeric(a) || !is.numeric(b)) stop("Arguments must be numeric")
+  if (length(b) != 2) stop("Second argument must have 2 elements")
+  return(a >= b[1] & a <=b[2])
+}
+
+.paste_unique <- function(x,...,na.rm=TRUE) {
+  x <- unique(x)
+  x <- x[!is.na(x)]
+  paste(x,...)
+}
+
+.grep_columns <- function(df,pattern,...,logical=TRUE) {
+  if (logical)
+    grepl(pattern,colnames(df),...)
+  else
+    grep(pattern,colnames(df),...)
+}
+
 #TODO: unify factor.as.character and factor.to.chr
 .factor.as.character <- function(df) {
   for (col_i in seq_len(ncol(df))) {
@@ -7,6 +30,13 @@ if(!isGeneric("as.data.frame")) setGeneric("as.data.frame", useAsDefault=as.data
       df[,col_i] <- as.character(df[,col_i])
   }
   df
+}
+
+# from Gavin Simpson [http://stackoverflow.com/questions/9788026/change-the-order-of-columns]
+.moveToFirstCol <- function(df, colname) {
+  cnams <- colnames(df)
+  want <- which(colname == cnams)
+  df[, c(cnams[want], cnams[-want])]
 }
 
 .factor.to.chr <- function(df) {
@@ -21,6 +51,12 @@ if(!isGeneric("as.data.frame")) setGeneric("as.data.frame", useAsDefault=as.data
 }
 
 # get a number range. E.g. 1,2,3,5,6 -> 1-3,5,6
+.string.number.ranges <- function(numbers) {
+  n <- number.ranges(numbers)
+  if (is.na(n)) return("")
+  else return(sprintf("[%s]",n))
+}
+
 number.ranges <- function(numbers) {
   if (all(is.na(numbers))) { return(NA) }
   numb=c()
@@ -181,6 +217,9 @@ setMethod("weightedMean",
   names(res) <- substring(x,rep(1,length(x)),pos-1)
   res
 }
+
+.sum.bool.na  <- function(x) 
+  c('TRUE'=sum(x,na.rm=TRUE),'FALSE'=sum(!x,na.rm=TRUE),'TRUE %'=round(sum(x,na.rm=TRUE)/length(x)*100,1),length=length(x),n.na=sum(is.na(x)))
 
 # provide summary of boolean vector values
 .sum.bool  <- function(x) 

@@ -106,12 +106,18 @@ setValidity("IBSpectra",.valid.IBSpectra)
 
 .PEAKS.COLS <- c(MASSFIELD="X%s_mass",IONSFIELD="X%s_ions")
 
-.ID.COLS <- c(SEARCHENGINE="search.engine",SCORE="score")
+.ID.COLS <- c(SEARCHENGINE="search.engine",SCORE="score",SCORE.MASCOT="score.mascot",SCORE.PHENYX="score.phenyx")
 
 .SPECTRUM.COLS <- c(PEPTIDE="peptide",MODIFSTRING="modif",CHARGE="charge",
                    THEOMASS="theo.mass",EXPMASS="exp.mass",
                    PARENTINTENS="parent.intens",RT="retention.time",
-                   SPECTRUM="spectrum",.ID.COLS)
+                   SPECTRUM="spectrum",SPECTRUM.QUANT="spectrum.quant",
+                   DISSOCMETHOD="dissoc.method",
+                   PRECURSOR.PURITY="precursor.purity",
+                   SCANS.FROM="scans.from",SCANS.TO="scans.to",
+                   RAWFILE="raw.file",NMC="nmc",DELTASCORE="deltascore",
+                   SCANS="scans",MASSDELTA.ABS="massdelta.abs",MASSDELTA.PPM="massdelta.ppm",
+                   .ID.COLS,NOTES="notes")
 
 .PEPTIDE.COLS <- c(PROTEINAC="accession",STARTPOS="start.pos",
                   REALPEPTIDE="real.peptide")
@@ -120,6 +126,12 @@ setValidity("IBSpectra",.valid.IBSpectra)
                    NAME="name",PROTEIN_NAME="protein_name",
                    GENE_NAME="gene_name",ORGANISM="organism")
 
+.ROCKERBOX.COLS <- c(PROTEINAC="accession",STARTPOS="start.pos",MODIFSTRING="modif",
+                     QN="mascot.query.number",RANK="rank",SCANS="scan.number.s.",RT="retention.time",
+                     RAWFILE="raw.file",PEPTIDE="sequence", "phosphosequence",NMC="miscleavages",
+                     SCORE="score",DELTASCORE="deltascore",PHOSPHO.DELTASCORE="phospho_deltascore",
+                     EXPMASS="peptide.mr",MASSDELTA.ABS="mass.delta..abs.",MASSDELTA.PPM="mass.delta..ppm.",
+                     ROCKERBOX_MOD="modifications",PROTEINACS="all.protein.matches",SPECTRUM="scan.title")
 
 ### - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 ### Constructor and readIBSpectra.
@@ -129,6 +141,7 @@ setMethod("initialize","IBSpectra",
     function(.Object,data=NULL,data.ions=NULL,data.mass=NULL,
              proteinGroupTemplate=NULL,fragment.precision=NULL,
              assayDataElements=list(),allow.missing.columns=FALSE,
+             annotate.spectra.f=NULL,merge.ids=TRUE,
              write.excluded.to=NULL,...) { 
       if (is.null(data)){
         callNextMethod(.Object,...)
@@ -137,6 +150,13 @@ setMethod("initialize","IBSpectra",
         reporterTagNames <- reporterTagNames(.Object)
 
         data <- .factor.to.chr(data)
+        if (is.function(annotate.spectra.f)) {
+          data <- annotate.spectra.f(data)
+        } else {
+          if (!is.null (annotate.spectra.f))
+            stop("annotate.spectra.f should be a function!")
+        }
+ 
 
         SC <- .SPECTRUM.COLS[.SPECTRUM.COLS %in% colnames(data)]
         PC <- .PROTEIN.COLS[.PROTEIN.COLS %in% colnames(data)]
@@ -174,29 +194,36 @@ setMethod("initialize","IBSpectra",
         data[,.PEPTIDE.COLS['REALPEPTIDE']] <- data[,SC['PEPTIDE']]
         data[,SC['PEPTIDE']] <- gsub("I","L",data[,SC['PEPTIDE']])
         
+        if ('SEARCHENGINE' %in% names(SC)) {
+        n.searchengines <- length(unique(data[,SC['SEARCHENGINE']])) 
+        merge.ids=FALSE
+        if (merge.ids) {
         # Merge identifications (of different search engines)
         if (SC['SEARCHENGINE'] %in% colnames(data) &&
-            length(unique(data[,SC['SEARCHENGINE']])) > 1 &&
+            n.searchengines > 1 &&
             any(colnames(data)==.ID.COLS['SCORE'])) {
           # put all coherent spectrum-peptide matches together
           data[,SC['SEARCHENGINE']] <-
             paste(data[,SC['SEARCHENGINE']],data[,SC['SCORE']])
           data[,SC['SCORE']] <- NULL
           SC <- SC[-which(SC==SC['SCORE'])]
+          pep.n.prot <- data[,c(.PROTEIN.COLS['PROTEINAC'],.PEPTIDE.COLS['STARTPOS'],SC['PEPTIDE'])]
           
-          columns <- c(.PROTEIN.COLS['PROTEINAC'],.PEPTIDE.COLS['STARTPOS'],
-                       SC[c('SPECTRUM','PEPTIDE','MODIFSTRING')])
-          data  <- ddply(data,as.character(columns),function(d) 
-              data.frame(d[1,setdiff(colnames(d),SC['SEARCHENGINE'])],
-                         search.engine=paste(d[,SC['SEARCHENGINE']],collapse="|"),
-                         stringsAsFactors=FALSE))
+          columns <- SC[c('SPECTRUM','PEPTIDE','MODIFSTRING')]
+          data  <- ddply(unique(data[,!colnames(data) %in% c(.PROTEIN.COLS['PROTEINAC'])]),
+                         as.character(columns),function(d) 
+                           data.frame(d[1,setdiff(colnames(d),SC['SEARCHENGINE'])],
+                                      search.engine=paste(d[,SC['SEARCHENGINE']],collapse="|"),
+                                      stringsAsFactors=FALSE))
+          data <- merge(pep.n.prot,data)
 
           ##data <- data[data[,SC['SPECTRUM']] %in% data.sc[,SC['SPECTRUM']],]
         }
+        }
         
         ## Merge identifications (of same search engine)
-        if ('SCORE' %in% names(SC)) {
-
+        #if (anyDuplicated(unique(data[,SC[c('SPECTRUM','PEPTIDE','MODIFSTRING')]])[,SC['SPECTRUM']])) {
+        if (FALSE) {
           columns <- as.character(SC[c('SPECTRUM','PEPTIDE','MODIFSTRING')])
           ## spectrum peptide hits are the same, but they might have different scores:
           ##  could be due to non-deterministic scores
@@ -212,10 +239,11 @@ setMethod("initialize","IBSpectra",
                          return(unique(d))
                        })
         }
+        }
         
         data.sc <- unique(data[,SC])
         # Check for divergent identifications of spectra
-        if (any(duplicated(data.sc[,SC['SPECTRUM']]))) {
+        if (anyDuplicated(data.sc[,SC['SPECTRUM']])) {
           dupl.spectra <- .get.dupl.n.warn(data.sc,SC['SPECTRUM'],write.to=write.excluded.to)
           #dupl.spectra <- .get.dupl.n.warn(data.sc[,SC[c("SPECTRUM","PEPTIDE","MODIFSTRING")]],SC['SPECTRUM'])
           # problem: different values in any column - what info should you choose??
@@ -274,6 +302,8 @@ setMethod("initialize","IBSpectra",
             id.n.quant <- intersect(rownames(data),rownames(data.mass))
             id.not.quant <- setdiff(rownames(data),rownames(data.mass))
             quant.not.id <- setdiff(rownames(data.mass),rownames(data))
+
+            if (length(id.n.quant)==0) stop("No spectra could be matched between identification and quantifications")
             
             if (length(quant.not.id) > 0)
               warning(length(quant.not.id)," spectra could not be mapped from quant to id: ",
@@ -317,18 +347,23 @@ setMethod("initialize","IBSpectra",
         fdata <- data[,SC]
         colnames(fdata) <- .SPECTRUM.COLS[nn]
 
-        VARMETADATA=data.frame(
-          labelDescription = 
-          c(PEPTIDE='peptide sequence',
+        label.desc <- c(PEPTIDE='peptide sequence',
             MODIFSTRING='modifications of peptide',
             CHARGE='peptide charge state',
             THEOMASS='theoretical peptide mass',
             EXPMASS='experimental peptide mass',
             PARENTINTENS='parent ion intensity',
             RT='retention time',SPECTRUM='spectrum title',
+            PRECURSOR.PURITY="precursor purity",
+            SCANS.FROM="scans from",SCANS.TO="scans to",
+            RAWFILE="raw file",NMC="nmc",DELTASCORE="deltascore",
+            SCANS="scans",MASSDELTA.ABS="massdelta (abs)",MASSDELTA.PPM="massdelta (ppm)",
             SEARCHENGINE='protein search engine',
             SCORE='protein search engine score'
-            ),row.names=.SPECTRUM.COLS)
+            )
+
+        VARMETADATA=data.frame(labelDescription=label.desc[names(.SPECTRUM.COLS)],
+                               row.names=.SPECTRUM.COLS)
 	    
         featureData <- new("AnnotatedDataFrame",data=fdata,
             varMetadata=VARMETADATA[nn,,drop=FALSE])
@@ -365,6 +400,8 @@ setMethod("readIBSpectra",
       else if (grepl(".ibspectra.csv$",f,ignore.case=TRUE) ||
                grepl(".id.csv$",f,ignore.case=TRUE))
         id.format.f <- "ibspectra.csv"
+      else if (grepl(".peptides.csv$",f)) 
+        id.format.f <- "rockerbox"
       else
         stop(paste("cannot parse file ",f," - cannot deduce format based on extenstion (it is not ibspectra.csv, id.csv or mzid). Please provide id.format to readIBSpectra",sep=""))          
     } else {
@@ -374,13 +411,38 @@ setMethod("readIBSpectra",
     if (id.format.f == "ibspectra.csv") {
       data <- read.table(f,header=T,stringsAsFactors=F,sep="\t")
       log <- rbind(log,c("identification file [id.csv]",f))
-    } else { 
-      if (id.format.f == "mzid") {
-        data <- read.mzid(f)
-        log <- rbind(log,c("identification file [mzid]",f))
-      } else {
-        stop(paste("cannot parse file ",f," - format [",id.format.f,"] not known.",sep=""))
-      }
+    } else if (id.format.f == "mzid") {
+      data <- read.mzid(f)
+      log <- rbind(log,c("identification file [mzid]",f))
+    } else if (id.format.f == "rockerbox") {
+      data.r <- read.table(f,header=T,stringsAsFactors=F,sep="\t")
+      if (!"scan.title" %in% colnames(data.r))
+        stop("no scan.title column in ",f,"; please use a Rockerbox version >= 2.0.6")
+
+      ## transform modification (TODO)
+      data.r$modif <- data.r$modifications
+      ## end transform
+      
+      ## transform 'all.peptide.matches' to ac and start.pos
+      split.acs <- strsplit(data.r$all.protein.matches,"; ")
+      names(split.acs) <- data.r$all.protein.matches
+      ac.n.startpos <- ldply(split.acs,function(x) {
+        y <- do.call(rbind,strsplit(x,split="\\[|\\]"))
+        start.pos <- sapply(strsplit(y[,2],"-",fixed=TRUE),
+                            function(z) if(all(!is.na(as.numeric(z))) && length(z) == 2) as.numeric(z[1])
+                            else stop("not numeric"))
+        data.frame(accession=y[,1],start.pos=start.pos)  
+      })
+      data.r <- merge(data.r,ac.n.startpos,by.x="all.protein.matches",by.y=".id")
+      data.r$all.protein.matches <- NULL
+      ## end transform
+
+      sel <- names(.ROCKERBOX.COLS) %in% names(c(.SPECTRUM.COLS,.PEPTIDE.COLS))
+      data <- data.r[,.ROCKERBOX.COLS[sel]]
+      colnames(data) <- c(.SPECTRUM.COLS,.PEPTIDE.COLS)[names(.ROCKERBOX.COLS)[sel]]
+      
+    } else {
+      stop(paste("cannot parse file ",f," - format [",id.format.f,"] not known.",sep=""))
     }
     return(data)
   })
@@ -391,6 +453,10 @@ setMethod("readIBSpectra",
   data[,.SPECTRUM.COLS['SPECTRUM']] <- .trim(data[,.SPECTRUM.COLS['SPECTRUM']])
   return(data)
 
+}
+
+writeIBSpectra <- function(ibspectra,file,sep="\t",row.names=FALSE,...) {
+  write.table(as.data.frame(ibspectra),file=file,sep=sep,row.names=row.names,...)
 }
 
 ##' readIBSpectra - read IBSpectra object from files
@@ -426,7 +492,7 @@ setMethod("readIBSpectra",
              mapping.file.readopts=list(header=TRUE,stringsAsFactors=FALSE,sep=","),
              id.file.domap=NULL,
              peaklist.format=NULL,id.format=NULL,fragment.precision=NULL,fragment.outlier.prob=NULL,
-             decode.titles=TRUE,scan.lines=0) {
+             decode.titles=TRUE,scan.lines=0,...) {
       
       log <- data.frame(key=c(),message=c())
 
@@ -464,12 +530,16 @@ setMethod("readIBSpectra",
       # all identified spectrum titles
       id.spectra <- unique(data[,.SPECTRUM.COLS['SPECTRUM']])
 
-      intensities <- list(ions=NULL,mass=NULL,spectrumtitles=NULL)
+      data.ions=c()
+      data.mass=c()
+      data.titles=c()
       for (peaklist.f in peaklist.file) {
         peaklist.format.f <- peaklist.format
         if (is.null(peaklist.format.f)) {
+
           if (grepl(".mgf$",peaklist.f,ignore.case=TRUE))peaklist.format.f <- "mgf"
           else if (grepl(".mcn$",peaklist.f,ignore.case=TRUE))peaklist.format.f <- "mcn"
+          else if (grepl(".intensities.csv$",peaklist.f,ignore.case=TRUE))peaklist.format.f <- "csv"
           else
             stop(paste("cannot parse file ",peaklist.f," - cannot deduce format (mgf or mcn)",sep=""))          
 
@@ -477,27 +547,14 @@ setMethod("readIBSpectra",
 
         if (tolower(peaklist.format.f) == "mgf") {
 
-          if (nrow(mapping.quant2id) > 0) {
-            ## for HCD/CID method, a mapping from identification
-            ## to quantitation spectra is neccessary
-            intensities.f <- 
-              .read.mgf.quant2id(peaklist.f,mapping.quant2id,id.spectra,
-                                 type=type,
-                                 fragment.precision=fragment.precision,
-                                 prob=fragment.outlier.prob)
-            
-          } else {
-            intensities.f <- .read.mgf(peaklist.f,type,spectra=id.spectra,
-                                       fragment.precision=fragment.precision,
-                                       prob=fragment.outlier.prob,scan.lines=scan.lines)
-          }
+          intensities.f <- .read.mgf(peaklist.f,type,
+                                     fragment.precision=fragment.precision,
+                                     prob=fragment.outlier.prob,scan.lines=scan.lines)
           if (nrow(intensities.f$ions) == 0) { stop("only NA data in ions/mass") }
-          intensities$spectrumtitles <- 
-            c(intensities$spectrumtitles,intensities.f$spectrumtitles)
-          intensities$ions <- rbind(intensities$ions,intensities.f$ions)
-          intensities$mass <- rbind(intensities$mass,intensities.f$mass)
-        } else {
-          if (tolower(peaklist.format.f) == "mcn") {
+          data.titles <- c(data.titles,intensities.f$spectrumtitles)
+          data.ions <- rbind(data.ions,intensities.f$ions)
+          data.mass <- rbind(data.mass,intensities.f$mass)
+        } else if (tolower(peaklist.format.f) == "mcn") {
             if (type != "iTRAQ4plexSpectra")
               stop("mcn format (iTracker) only supports iTRAQ 4plex spectra!")
             mcn.i <- read.table("itraqdta/i-Tracker.mcn",sep=",",skip=2,
@@ -505,20 +562,37 @@ setMethod("readIBSpectra",
                   "numeric","numeric","numeric","numeric",rep("NULL",36)),
                 col.names=c("spectrum","spectrum.t","114","115","116","117",rep("",36)),
                 check.names=FALSE)
-            intensities$spectrum.titles <- c(intensities$spectrumtitles,mcn.i$spectrum)
-            intensities$ions <- c(intensities$ions,as.matrix(mcn.i[,3:6]))
-            intensities$mass <- c(intensities$mass,
+            data.titles <- c(data.titles,mcn.i$spectrum)
+            data.ions <- c(data.ions,as.matrix(mcn.i[,3:6]))
+            data.mass <- c(data.mass,
                 matrix(rep(114:117,nrow(mcn.i)),nrow=nrow(mcn.i),byrow=TRUE))
-          }
+        } else if (tolower(peaklist.format.f) == "csv") {
+          message("reading ",peaklist.f)
+          res <- read.delim(peaklist.f,stringsAsFactors=FALSE)
+          message("done reading ",peaklist.f)
+          
+          ## FIX::
+          #if (!is.null(id.spectra) && length(id.spectra) != 0) 
+          #  res <- res[res[,"spectrum"] %in% id.spectra,]
+
+          data.titles <- c(data.titles,res[,"spectrum"])
+          data.ions <- rbind(data.ions,as.matrix(res[,.grep_columns(res,"ions$")]))
+          data.mass <- rbind(data.mass,as.matrix(res[,.grep_columns(res,"mass$")]))
+
         }
       }
+      if (nrow(mapping.quant2id) > 0)
+        data.titles <- .do.map(data.titles,mapping.quant2id,id.spectra)
+      rownames(data.ions)  <- data.titles
+      rownames(data.mass)  <- data.titles
       ## TODO: check that all identified spectra are present in intensities
+
       
-      new(type,data=data,data.mass=intensities$mass,data.ions=intensities$ions)
+      new(type,data=data,data.mass=data.mass,data.ions=data.ions,...)
     }
 )
 
-.read.mgf.quant2id <- function(peaklist.f,mapping.quant2id,id.spectra,...) {
+.do.map <- function(spectrumtitles,mapping.quant2id,id.spectra) {
   mapped.spectra.pl <-
     mapping.quant2id$peaklist[ mapping.quant2id$id %in%
                                   id.spectra]
@@ -528,20 +602,14 @@ setMethod("readIBSpectra",
                         "not all identified spectra could be matched!\n",
                         "\tx ... identified spectra\n",
                         "\ty ... mapped spectra\n")
-  
-  intensities.f <- .read.mgf(peaklist.f,...)
-  spectra.map <- .as.vect(mapping.quant2id,"id","peaklist")
+   spectra.map <- .as.vect(mapping.quant2id,"id","peaklist")
 
-  .stopiflengthnotequal(intensities.f$spectrumtitles,
-                        spectra.map[intensities.f$spectrumtitles],
+  .stopiflengthnotequal(spectrumtitles,
+                        spectra.map[spectrumtitles],
                         "not all spectra could be matched!\n",
                         "\tx ... spectra with quant info\n",
                         "\ty ... identified spectra\n")
-  
-  intensities.f$spectrumtitles <- spectra.map[intensities.f$spectrumtitles]
-  rownames(intensities.f$ions) <- intensities.f$spectrumtitles
-  rownames(intensities.f$mass) <- intensities.f$spectrumtitles
-  return(intensities.f)
+  spectra.map[spectrumtitles]
 }
 
 .get.dupl.n.warn <- function(df,col,msg="ibspectra",write.to=NULL) {
@@ -919,6 +987,42 @@ setAs("IBSpectra","data.frame.concise",
             colnames(rm),colnames(ri))]
     }
 )
+
+.IBSpectraAsConciseDataFrame <- function(from,show.phospho.position=FALSE) {
+  # prepare ProteinGroup data.frame
+  indist.proteins <- indistinguishableProteins(proteinGroup(from))
+  pg.df <- as(proteinGroup(from),"data.frame.concise")
+  colnames(pg.df)[colnames(pg.df) == "proteins"] <- .PROTEIN.COLS['PROTEINAC_CONCISE']
+  colnames(pg.df)[colnames(pg.df) == "peptide"] <- .SPECTRUM.COLS['PEPTIDE']
+
+  # prepare fData data.frame
+  ri <-reporterIntensities(from)
+  colnames(ri) <- paste("X",reporterTagNames(from),"_ions",sep="")
+  rm <- reporterMasses(from)
+  colnames(rm) <- paste("X",reporterTagNames(from),"_mass",sep="")
+  fdata.df <- cbind(fData(from),rm,ri)
+
+  # merge data.frames
+  res <- unique(merge(pg.df,fdata.df,by=.SPECTRUM.COLS['PEPTIDE'],all=TRUE,sort=FALSE))
+
+  if (show.phospho.position) {
+    res.nice <- data.frame(Sequence=.convertPeptideModif(res$peptide,res$modif),
+                           Phospho.Position=.convertModifToPos(res$modif,"PHOS"))
+  } else {
+    res.nice <- data.frame(Sequence=res$peptide)
+  }
+  res.nice <- cbind(res.nice,
+                    Modification=res$modif,
+                    AC=.protein.acc(res[,"accession"],ip=indist.proteins),
+                    ID=proteinInfo(protein.group,res[,"accession"],do.warn=FALSE),
+                    n=sapply(res[,"accession"],function(p) {length(names(indist.proteins)[indist.proteins == p])}))
+  res <- res[,!.grep_columns(res,c("peptide","modif","accession"))]
+  # return in order
+  res.nice <- cbind(res.nice,res[,c(intersect(.SPECTRUM.COLS,colnames(res)),
+                                    colnames(rm),colnames(ri))])
+  res.nice[order(res$AC,res$Sequence,res$modif),]
+}
+
 setMethod("as.data.frame",signature(x="IBSpectra"), 
 		function(x, row.names=NULL, optional=FALSE, ...) as(x,"data.frame"))
 
@@ -978,20 +1082,20 @@ setGeneric("reporterMasses<-", function(x,...,value)
 setMethod("reporterData","IBSpectra",
     function(x,element="ions",na.rm=FALSE,...) {
       sel <- spectrumSel(x,...)
-		data <- assayDataElement(x,element)[sel,,drop=FALSE]
-      
+      data <- assayDataElement(x,element)[sel,,drop=FALSE]
+
       if (na.rm & length(data) > 0) 
         return(data[apply(!is.na(data),1,all),,drop=FALSE])
       else       
         return(data)
     }
-)
+    )
 
 setReplaceMethod("reporterData","IBSpectra",
     function(x,element="ions",...,value) {
       sel <- spectrumSel(x,...)
-		assayDataElement(x,element)[sel,] <- value
-		x
+      assayDataElement(x,element)[sel,] <- value
+      x
     }
 )
 
@@ -1030,7 +1134,7 @@ setMethod("spectrumSel",signature(x="IBSpectra",peptide="missing",protein="missi
     function(x) rep(TRUE,nrow(fData(x))))
 
 setMethod("spectrumSel",signature(x="IBSpectra",peptide="matrix",protein="missing"),
-    function(x,peptide,modif=NULL,spectrum.titles=FALSE) {
+    function(x,peptide,modif=NULL,spectrum.titles=FALSE,use.for.quant.only=TRUE,do.warn=TRUE) {
         if (length(peptide) == 0) {
           warning("0L peptide provided")
           return(FALSE)
@@ -1043,7 +1147,7 @@ setMethod("spectrumSel",signature(x="IBSpectra",peptide="matrix",protein="missin
         
         for (m in modif)
           sel <- sel & grepl(m,fData(x)[,.SPECTRUM.COLS['MODIFSTRING']])
-        if (!any(sel)) warning("No spectra for peptide ",peptide)
+        if (!any(sel) && do.warn) warning("No spectra for peptide ",peptide)
         if (spectrum.titles)
           return(rownames(fData(x))[sel])
         else
@@ -1052,7 +1156,7 @@ setMethod("spectrumSel",signature(x="IBSpectra",peptide="matrix",protein="missin
 )
 
 setMethod("spectrumSel",signature(x="IBSpectra",peptide="character",protein="missing"),
-    function(x,peptide,modif=NULL,spectrum.titles=FALSE) {
+    function(x,peptide,modif=NULL,spectrum.titles=FALSE,do.warn=TRUE) {
         if (length(peptide) == 0) {
           warning("0L peptide provided")
           return(FALSE)
@@ -1060,7 +1164,7 @@ setMethod("spectrumSel",signature(x="IBSpectra",peptide="character",protein="mis
         sel <- fData(x)[,.SPECTRUM.COLS['PEPTIDE']]  %in% peptide
         for (m in modif)
           sel <- sel & grepl(m,fData(x)[,.SPECTRUM.COLS['MODIFSTRING']])
-        if (!any(sel)) warning("No spectra for peptide ",peptide)
+        if (!any(sel) && do.warn) warning("No spectra for peptide ",peptide)
         if (spectrum.titles)
           return(rownames(fData(x))[sel])
         else
@@ -1069,12 +1173,14 @@ setMethod("spectrumSel",signature(x="IBSpectra",peptide="character",protein="mis
 )
 
 setMethod("spectrumSel",signature(x="IBSpectra",peptide="missing",protein="character"),
-    function(x,protein,specificity=REPORTERSPECIFIC,modif=NULL,spectrum.titles=FALSE,...) {
+    function(x,protein,specificity=REPORTERSPECIFIC,modif=NULL,spectrum.titles=FALSE,do.warn=FALSE,...) {
       
-      peptides <- peptides(x=proteinGroup(x),protein=protein,specificity=specificity,do.warn=FALSE,...)
+      peptides <- peptides(x=proteinGroup(x),protein=protein,specificity=specificity,do.warn=do.warn,...)
       if (length(peptides) == 0)
         return(FALSE)
-      sel <- spectrumSel(x,peptide=peptides,spectrum.titles=spectrum.titles,modif=modif)
+
+      sel <- spectrumSel(x,peptide=peptides,spectrum.titles=spectrum.titles,
+                         modif=modif,do.warn=do.warn)
       if ((spectrum.titles & any(sel)) || (!spectrum.titles & !any(sel)))
         warning("No spectra for protein ",protein,
                 " with specificity ",paste(specificity,collapse=","))
@@ -1471,27 +1577,41 @@ setMethod("plotRatio",
 )
 
 maplot.protein <- function(x,relative.to,protein,noise.model=NULL,
-        channels=NULL,ylim=NULL,identify=FALSE,add=FALSE,pchs=NULL,log="xy",
+        channels=NULL,xlim=NULL,ylim=NULL,identify=FALSE,add=FALSE,pchs=NULL,log="xy",
         legend.pos="topright",names=NULL,legend.cex=0.8,cols=pchs,ltys=NULL,
-        main=protein,xlab="average intensity",ylab="ratio",type="ma",...) {
+        main=protein,xlab=NULL,ylab=NULL,type="ma",...) {
       
-      i.df <- data.frame()
-      legend <- list(text=c(),lty=c(),pch=c())
-      i <- 1
+    i.df <- data.frame()
+    legend <- list(text=c(),lty=c(),pch=c())
+    i <- 1
 	  if (is(x,"IBSpectra"))
-        x <- c(x)
-      if (is.null(channels)) channels <- setdiff(reporterTagNames(x[[1]]),relative.to)
-      if (is.null(pchs)) pchs <- seq_along(channels)
+      x <- c(x)
+    if (is.null(channels)) channels <- setdiff(reporterTagNames(x[[1]]),relative.to)
+    if (is.null(pchs)) pchs <- seq_along(channels)
 
-      for (ib in x) {
-      
-        ions <- reporterIntensities(ib,na.rm=FALSE,protein=protein)
+    if (is.null(xlab) && type=="ma") xlab <- "average intensity"
+    if (is.null(ylab) && type=="ma") ylab <- "ratio"
+
+    if (is.null(xlab) && type!="ma") xlab <- paste("intensity",relative.to)
+    if (is.null(ylab) && type!="ma") ylab <- paste("intensity",paste(channels,collapse=", "))
+    
+
+    for (ib in x) {
+      ions <- reporterIntensities(ib,na.rm=FALSE,protein=protein)
+      if (length(ions) == 0 || all(is.na(ions)))
+        next;
+
+      if (is.null(xlim))
+        xlim <- range(ions,na.rm=TRUE)
+      if (is.null(ylim) && type!="ma") ylim <- xlim
+      if (any(!is.finite(xlim))) xlim  <- NULL
+      if (type == "ma")
         ions[which(is.na(ions))] <- 0
-            
+
       for (channel_i in seq_along(channels)) {
         channel <- channels[channel_i]
         channel.rt <- ifelse(length(relative.to) == 1,relative.to,relative.to[channel_i])
-         if (length(ions[,channel])>0) {
+        if (length(ions[,channel])>0) {
           if (is.null(names))
             legend$text <- c(legend$text,sprintf("%s/%s",channel,channel.rt))
           else
@@ -1499,48 +1619,62 @@ maplot.protein <- function(x,relative.to,protein,noise.model=NULL,
           legend$pch <- c(legend$pch,pchs[i])
           legend$lty <- c(legend$pch,ltys[i])
         }
-        
+
         if (type=="ma") {
           div <- ions[,channel]/ions[,channel.rt]
           avg <- (ions[,channel]+ions[,channel.rt])/2
           div[div == Inf] = 100
           div[div == -Inf] = 0.01
+          div[div > 100] = 90
+          div[div < 0.01] = 1/90
           x <- avg
           y <- div
         } else {
-          x <- ions[,channel]
-          y <- ions[,channel.rt]
+          x <- ions[,channel.rt]
+          y <- ions[,channel]
         }
-       
+
         if (channel_i == 1 && add == FALSE) 
-          plot(x,y,ylim=ylim,pch=pchs[i],log=log,main=main,col=cols[i],
+          plot(x,y,xlim=xlim,ylim=ylim,pch=pchs[i],log=log,main=main,col=cols[i],
                xlab=xlab,ylab=ylab,...)
         else
           points(x,y,pch=pchs[i],col=cols[i],...)
-        
+
         add = TRUE
-        if (identify)
-          i.df <- rbind(i.df,data.frame(x=x,y=y,spectrum=rownames(ions),
-                  peptide=peptides(x=ib,spectrum=rownames(ions)),stringsAsFactors=T))
+          if (identify)
+            i.df <- rbind(i.df,data.frame(x=x,y=y,spectrum=rownames(ions),
+                                          peptide=peptides(x=ib,spectrum=rownames(ions)),stringsAsFactors=T))
 
         if (!is.null(noise.model)) {
           ratio <- estimateRatio(ib,noise.model,channel.rt,channel,protein=protein)
-          abline(h=10^ratio[1],lty=ltys[i],col=cols[i],...)
-          
+          ratio.lm <- estimateRatio(ib,noise.model,channel.rt,channel,protein=protein,method="lm")
+          #abline(h=10^ratio[1],lty=ltys[i],col=cols[i],...)
+
+          if (type=="ma") {
+            abline(h=10^ratio[1],lty=1,col=cols[i],...)
+            abline(h=ratio.lm['ratio'],lty=2,col=cols[i],...)
+          } else {
+            #abline(0,10^ratio[1],lty=1,col=cols[i],...)
+            abline(0,10^ratio[1],lty=1,col=cols[i],untf=TRUE,...)
+            abline(0,ratio.lm['ratio'],lty=2,col=cols[i],untf=TRUE,...)
+          }
+
           if (!is.na(ratio[1]))
-          legend$text[length(legend$text)] <- 
+            legend$text[length(legend$text)] <- 
               sprintf("%s = %.2f +/- %.2f",legend$text[length(legend$text)],10^ratio[1],10^sqrt(ratio[2]))
           #abline(h=10^(ratio[1]+1.96*sqrt(ratio[2])),lty=channel_i,lwd=0.5)
           #abline(h=10^(ratio[1]-1.96*sqrt(ratio[2])),lty=channel_i,lwd=0.5)
         }
         i <- i + 1
       }
-      }
-      legend(legend.pos,legend=legend$text,pch=legend$pch,lty=legend$lty,cex=legend.cex,col=cols)
-      if (identify) {
-        identify(x=i.df$x,y=i.df$y,labels=i.df$peptide)
-      }
+    }
+    if (length(legend$text) > 0 ) {
+    legend(legend.pos,legend=legend$text,pch=legend$pch,lty=legend$lty,cex=legend.cex,col=cols)
+    if (identify) {
+      identify(x=i.df$x,y=i.df$y,labels=i.df$peptide)
+    }}
 }
+
 
 
 setMethod("protGgdata",
@@ -1809,18 +1943,22 @@ setMethod("maplot",
               for (i in colnames(ions)) {
                 for (j in colnames(ions)) {
                   if (i == j) { 
-                    hist(log10(ions[,i]), col="#EEEEEE", freq=FALSE, 
-                         xlim=histlimits,cex=0.5,
-                         bty="n", xaxt="n", yaxt="n", main="",ylim=c(0,1))
+                    if (all(is.na(ions[,i])))
+                      plot(histlimits,c(1,1),type="n",bty="n", xaxt="n", yaxt="n", main="",ylim=c(0,1))
+                    else
+                      hist(log10(ions[,i]), col="#EEEEEE", freq=FALSE, 
+                           xlim=histlimits,cex=0.5,
+                           bty="n", xaxt="n", yaxt="n", main="",ylim=c(0,1))
                     text(sum(histlimits)/2,0.5,i,col="black",cex=1.4,font=2); 
 
                   } else if (i > j) {
-                    plot.labels = i == tail(colnames(ions),1) && j == head(colnames(ions),1)
+                    plot.labels.x = is.null(xlim) || (i == tail(colnames(ions),1) && j == head(colnames(ions),1))
+                    plot.labels.y = is.null(ylim) || (i == tail(colnames(ions),1) && j == head(colnames(ions),1))
                     maplot(x=x,channel1=as.character(i),channel2=as.character(j),
                            noise.model=noise.model,xlim=xlim,ylim=ylim,
                            set.na.to=set.na.to,set.na.to.lim=set.na.to.lim,
-                           x.axis.labels= plot.labels,
-                           y.axis.labels= plot.labels,
+                           x.axis.labels = plot.labels.x,
+                           y.axis.labels = plot.labels.y,
                            ...)
                     
                   }

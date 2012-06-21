@@ -44,9 +44,15 @@ do.zip <- get.arg("--zip")
 protein.report <- get.arg("--protein")
 peptide.report <- get.arg("--peptide")
 
+xls.report <- get.arg("--xls")
+xlsx.report <- get.arg("--xlsx")
+qc.report <- get.arg("--qc")
+pdf.report <- get.arg("--pdf")
+
 ## TODO: parse further arguments
 
-message("Loading package isobar ...")
+message("started at ",date())
+message("Loading package isobar v",packageDescription("isobar")$Version," ...")
 suppressPackageStartupMessages(library(isobar))
 
 if (!exists("properties.env",inherits=FALSE)) {
@@ -55,11 +61,25 @@ if (!exists("properties.env",inherits=FALSE)) {
                                     args=args)
 }
 
+if (xls.report || xlsx.report || qc.report || pdf.report) {
+  properties.env$write.xls.report <- (xls.report || xlsx.report)
+  if (properties.env$write.xls.report) {
+    if (xls.report) properties.env$spreadsheet.format <- 'xls'
+    if (xlsx.report) properties.env$spreadsheet.format <- 'xlsx'
+  }
+
+  properties.env$write.qc.report <- qc.report
+  properties.env$write.report <- pdf.report
+  do.compile <- TRUE
+}
+
 
 tryCatch({create.reports(report.type=ifelse(peptide.report,"peptide","protein"),
                          compile=do.compile,zip=do.zip)},
          error=function(e) {
            save.image(file="isobar.fail.rda")
-           stop(as.character(e))
+           stop("create.reports exited with an error - saving session to isobar.fail.rda.\n\n  Message: ",
+                 as.character(e))
          }
          )
+message("finished at ",date())

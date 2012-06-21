@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 # Creation date : 2010-09-29
-# Last modified : Mon 18 Jun 2012 05:05:18 PM CEST
+# Last modified : Mon 18 Jun 2012 05:02:04 PM CEST
 
 # Module        : tab2xls.pl
 # Purpose       : converts csv files to XLS format
@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 no warnings 'uninitialized';
-use Spreadsheet::WriteExcel;
+use Excel::Writer::XLSX;
 use File::Basename;
 
 my $delim="\t";
@@ -35,7 +35,7 @@ if (@ARGV == 1) {
 print STDERR "writing XLS file $xls_file\n";
 
 # Create a new Excel workbook
-my $workbook = Spreadsheet::WriteExcel->new($xls_file);
+my $workbook = Excel::Writer::XLSX->new($xls_file);
 $workbook->set_properties(
   title => $props->{'title'},
   author => $props->{'author'},

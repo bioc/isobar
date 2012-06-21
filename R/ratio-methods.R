@@ -159,7 +159,7 @@ setMethod("estimateRatioNumeric",signature(channel1="numeric",channel2="numeric"
              sign.level=0.05,sign.level.rat=sign.level,sign.level.sample=sign.level,
              remove.outliers=TRUE,outliers.coef=1,outliers.trim=0,n.sample=NULL, 
              method="isobar",fc.threshold=1.3,channel1.raw=NULL,channel2.raw=NULL,
-             use.na=FALSE) {
+             use.na=FALSE,preweights=NULL) {
       
       if (length(channel1) != length(channel2))
         stop("length of channel 1 does not equal length of channel 2")
@@ -169,7 +169,7 @@ setMethod("estimateRatioNumeric",signature(channel1="numeric",channel2="numeric"
       
       if (length(channel1)==0) {
         if (method == "isobar")
-          return(c(lratio=NA,variance=NA,n.spectra=NA,
+          return(c(lratio=NA,variance=NA,n.spectra=NA,n.na1=NA,n.na2=NA,
                    p.value.rat=NA,p.value.sample=NA,is.significant=NA))
         else if (method=="libra" | method == "pep")
           return(c(ch1=NA,ch2=NA))
@@ -208,155 +208,119 @@ setMethod("estimateRatioNumeric",signature(channel1="numeric",channel2="numeric"
 
       ## Compute all the spectrum ratios and their individual
       ## variance based on the noise model
-      log.ratio = i2[sel.notna] - i1[sel.notna]
+      log.ratios = i2 - i1
+
+      if (remove.outliers) {
+        sel.outliers <- .sel.outliers(log.ratios,outliers.coef,outliers.trim)
+        sel <- sel & !sel.outliers
+      }
+      
+      # Select non-NA outlier removed spectra
+      channel1 <- channel1[sel]
+      channel2 <- channel2[sel]
+      i1 <- i1[sel]
+      i2 <- i2[sel]
+      log.ratios <- log.ratios[sel]
+
       if (is.null(channel1.raw))
         var.i <- variance(noise.model,i1,i2)
       else 
         var.i <- variance(noise.model,
-                          log10(channel1.raw),log10(channel2.raw))
+                          log10(channel1.raw[sel]),log10(channel2.raw[sel]))
       
       ## linear regression estimation
       if (method=="lm" || method=="compare.all") {
-        fm <- lm(channel2~channel1+0,
-                 weights=1/var.i)
-        summary.fm <- summary.lm(fm)$coefficients
-        ci <- confint(fm,level=1-sign.level.rat)
-        res.lm <- c(lratio=log10(summary.fm[1]),
-                    ratio=summary.fm[1],
-                    stderr=summary.fm[2],
-                    ratio.ci.l=ci[1],
-                    ratio.ci.u=ci[2])
-
-        if (!is.null(ratiodistr)) {
-          rat.neg <- log10(res.lm['ratio']) < distr::q(ratiodistr)(0.5)
-          ci[ci < 0] <- 0
-          # TODO: fix confidence interval which goes to minus
-          #message(paste(ci,collapse=":"))
-          lrat.p <- log10(ifelse(rat.neg,ci[2],ci[1]))
-          res.lm['p.value'] <- distr::p(ratiodistr)(lrat.p,lower.tail=rat.neg)
-          res.lm['is.significant'] <- res.lm['p.value'] < sign.level.sample
-        }
-        
+        res.lm <- .calc.lm(channel1,channel2,sign.level.sample,sign.level.rat,ratiodistr) 
         if (method == "lm") return (res.lm)
+      }      
+
+      ## weighted linear regression estimation
+      if (method=="weighted lm" || method=="compare.all") {
+        res.wlm <- .calc.weighted.lm(channel1,channel2,var.i,sign.level.sample,sign.level.rat,ratiodistr) 
+        if (method == "weighted lm") return (res.wlm)
       }      
        
       # First, compute ratios on spectra with intensities for both reporter ions
       lratio.n.var <-
-        .calc.weighted.ratio(sel.notna,i1,i2,var.i,
-                             remove.outliers,outliers.coef,outliers.trim,
-                             variance.function)
+        .calc.weighted.ratio(log.ratios,var.i,variance.function,preweights[sel])
       
       if (method == "ttest" || method == "compare.all") {
-        if (length(log.ratio) < 2) p.value <- 1  else p.value <- t.test(log.ratio)$p.value
+        if (length(log.ratios) < 2) p.value <- 1  else p.value <- t.test(log.ratios)$p.value
         res.ttest <- c(
-                       lratio=lratio.n.var['lratio'],variance=NA,n.spectra=length(log.ratio),
+                       lratio=lratio.n.var['lratio'],variance=NA,n.spectra=length(log.ratios),
             p.value=p.value,is.significant=p.value<sign.level)
         if (method != "compare.all") return(res.ttest)
       }
 #if (method == "wttest" || method == "compare.all") {
-#        p.value <- (length(log.ratio) < 2)? 1 : weighted.t.test(log.ratio,w=weights,weighted.ratio)$p.value
+#        p.value <- (length(log.ratios) < 2)? 1 : weighted.t.test(log.ratios,w=weights,weighted.ratio)$p.value
 #        res.wttest <- c(
-#            lratio=weighted.ratio,variance=NA,n.spectra=length(log.ratio),
+#            lratio=weighted.ratio,variance=NA,n.spectra=length(log.ratios),
 #            p.value=p.value,is.significant=p.value<sign.level)
 #        if (method != "compare.all") return(res.wttest)
 #      }
       if (method == "fc" || method == "compare.all") {
         res.fc <- c(lratio=lratio.n.var['lratio'],variance=NA,
-                    n.spectra=length(log.ratio),
+                    n.spectra=length(log.ratios),
                     is.significant=abs(lratio.n.var['lratio'])>log10(fc.threshold))
-        ratio.nw <- mean(log.ratio,na.rm=TRUE)
-        res.fc.nw <- c(lratio=ratio.nw,variance=NA,n.spectra=length(log.ratio),
+        ratio.nw <- mean(log.ratios,na.rm=TRUE)
+        res.fc.nw <- c(lratio=ratio.nw,variance=NA,n.spectra=length(log.ratios),
             is.significant=abs(ratio.nw)>log10(fc.threshold))
         if (method != "compare.all") return(res.fc)
       }
  
       if (method == "isobar" || method == "compare.all") {
-        if (use.na) {
-        # Then, check for channels where one is NA
+        # Check for channels where one is NA
         sel.ch1na <- is.na(channel1) & !is.na(channel2)
         sel.ch2na <- is.na(channel2) & !is.na(channel1)
 
-        # Require channel intensity to be outside of the 'NA region'
-        sel.ch1na <- sel.ch1na & i2 > quantile(naRegion(noise.model),prob=0.99)
-        sel.ch2na <- sel.ch2na & i1 > quantile(naRegion(noise.model),prob=0.99)
+        if (use.na) {
+          # TODO: stub
+          .calc.w.na()
+        } # use.na
 
-        # Set the value of that channel to a rather high one
-        val <- quantile(naRegion(noise.model),prob=0.5)
-
-        # Require the ratio to be higher than the previously observed one
-        # TODO: handle case when we have no ratio
-        if (!is.na(lratio.n.var['lratio'])) {
-          if (lratio.n.var['lratio'] < 0) {
-            
-            sel.ch1na <- sel.ch1na & i2 - val < lratio.n.var['lratio']
-            sel.ch2na <- sel.ch2na & val - i1 < lratio.n.var['lratio']
-          } else {
-            sel.ch1na <- sel.ch1na & i2 - val > lratio.n.var['lratio']
-            sel.ch2na <- sel.ch2na & val - i1 > lratio.n.var['lratio']
-          }
-        }
-
-#        i1[sel.ch1na] <- max(val,i2[sel.ch1na]-10)
-#        i2[sel.ch2na] <- max(val,i1[sel.ch2na]-10)
-#        i1.raw[sel.ch1na] <- max(val,i2[sel.ch1na]-10)
-#        i2.raw[sel.ch2na] <- max(val,i1[sel.ch2na]-10)
-        
-        i1[sel.ch1na] <- val
-        i2[sel.ch2na] <- val
-        i1.raw[sel.ch1na] <- i2.raw[sel.ch1na]
-        i2.raw[sel.ch2na] <- i1.raw[sel.ch2na]
-
-        sel <- sel.notna | sel.ch1na | sel.ch2na
-#        message("ch1na: ",sum(sel.ch1na),"; ch2na: ",sum(sel.ch2na))
-
-        # calculate final ratio
-        lratio.n.var <- 
-          calc.weighted.ratio(sel,i1,i2,var.i,
-                              remove.outliers,outliers.coef,outliers.trim,
-                              variance.function)
-        }
         weighted.ratio <- as.numeric(lratio.n.var['lratio'])
         calc.variance <- as.numeric(lratio.n.var['calc.variance'])
 
-        if (is.null(ratiodistr))
-          res.isobar <- c(lratio=weighted.ratio, variance=calc.variance,
-              n.spectra=length(log.ratio),
-              p.value.rat=pnorm(weighted.ratio,mean=0,sd=sqrt(calc.variance),
-                                lower.tail=weighted.ratio<0),
-              p.value.sample=NA,is.significant=NA)
-        else {
-             res.isobar <-
-                c(lratio=weighted.ratio, variance=calc.variance,
-                  n.spectra=length(log.ratio),
-                  p.value.rat=pnorm(weighted.ratio,
-                    mean=distr::q(ratiodistr)(0.5),sd=sqrt(calc.variance),
-                    lower.tail=weighted.ratio<distr::q(ratiodistr)(0.5)),
-                  p.value.sample=p(ratiodistr)(weighted.ratio,
-                    lower.tail=weighted.ratio<distr::q(ratiodistr)(0.5)))
-             if (method=="compare.all") 
-               res.isobar['is.significant.ev'] <- 
-                 (res.isobar['p.value.sample'] <= sign.level.sample) &&
-             pnorm(weighted.ratio,mean=distr::q(ratiodistr)(0.5),
-                   sd=as.numeric(sqrt(lratio.n.var['estimator.variance'])),
-                   lower.tail=weighted.ratio<distr::q(ratiodistr)(0.5))
-             
-             res.isobar['is.significant'] <- 
-                       (res.isobar['p.value.sample'] <= sign.level.sample) && 
-                       (res.isobar['p.value.rat'] <= sign.level.rat)
-        }
+        res.isobar <- 
+          c(lratio=weighted.ratio, variance=calc.variance,
+            n.spectra=length(log.ratios),
+            n.na1=sum(sel.ch1na),n.na2=sum(sel.ch2na),
+            p.value.rat=pnorm(weighted.ratio,mean=0,sd=sqrt(calc.variance),
+                              lower.tail=weighted.ratio<0),
+            p.value.sample=NA,is.significant=NA)
+        
+        if (!is.null(ratiodistr)) 
+          res.isobar['p.value.sample'] <- 
+            p(ratiodistr)(weighted.ratio,lower.tail=weighted.ratio<distr::q(ratiodistr)(0.5))
+
+        if (method=="compare.all") 
+          res.isobar['is.significant.ev'] <- 
+            (res.isobar['p.value.sample'] <= sign.level.sample) &&
+            pnorm(weighted.ratio,mean=distr::q(ratiodistr)(0.5),
+                  sd=as.numeric(sqrt(lratio.n.var['estimator.variance'])),
+                  lower.tail=weighted.ratio<distr::q(ratiodistr)(0.5)) <= sign.level.rat
+
+        res.isobar['is.significant'] <- 
+          (res.isobar['p.value.sample'] <= sign.level.sample) && 
+          (res.isobar['p.value.rat'] <= sign.level.rat)
+
         if (method != "compare.all") return(res.isobar)
       }
       if (method != "compare.all") stop(paste("method",method,"not available"))
         return(c(lratio=weighted.ratio,
-                 ratio=10^weighted.ratio,
-                 ratio.lm=as.numeric(res.lm['ratio']),
+                 lratio.lm=as.numeric(res.lm['lratio']),
+                 lratio.wlm=as.numeric(res.wlm['lratio']),
                  variance=calc.variance,
+                 var.ev=lratio.n.var['estimator.variance'],
+                 var.sv=lratio.n.var['sample.variance'],
                  var.lm=as.numeric(res.lm['stderr']**2),
-                 n.spectra=length(log.ratio),
-                 unweighted.ratio=mean(log.ratio,na.rm=TRUE),
+                 var.lm.w=as.numeric(res.wlm['stderr']**2),
+                 n.spectra=length(log.ratios),
+                 unweighted.ratio=mean(log.ratios,na.rm=TRUE),
                  is.sign.isobar    = as.numeric(res.isobar['is.significant']),
                  is.sign.isobar.ev = as.numeric(res.isobar['is.significant.ev']),
                  is.sign.lm        = as.numeric(res.lm['is.significant']),
+                 is.sign.wlm        = as.numeric(res.wlm['is.significant']),
                  is.sign.rat       = as.numeric(res.isobar['p.value.rat']<sign.level),
                  is.sign.sample    = as.numeric(res.isobar['p.value.sample']<sign.level),
                  is.sign.ttest     = as.numeric(res.ttest['is.significant']),
@@ -366,37 +330,135 @@ setMethod("estimateRatioNumeric",signature(channel1="numeric",channel2="numeric"
                  ))
     }
 )
+
+.calc.lm <- function(channel1,channel2,
+                     sign.level.rat,sign.level.sample,ratiodistr) {
+  res.lm <- NA
+  if (any(!is.na(channel1) & !is.na(channel2))){
+    fm <- lm(channel2~channel1+0)
+    summary.fm <- summary.lm(fm)$coefficients
+    ci <- confint(fm,level=1-sign.level.rat)
+    res.lm <- c(lratio=log10(summary.fm[1]),
+                ratio=summary.fm[1],
+                stderr=summary.fm[2],
+                ratio.ci.l=ci[1],
+                ratio.ci.u=ci[2])
+
+    if (!is.null(ratiodistr)) {
+      rat.neg <- log10(res.lm['ratio']) < distr::q(ratiodistr)(0.5)
+      ci[ci < 0] <- 0
+      # TODO: fix confidence interval which goes to minus
+      #message(paste(ci,collapse=":"))
+      lrat.p <- log10(ifelse(rat.neg,ci[2],ci[1]))
+      res.lm['p.value'] <- distr::p(ratiodistr)(lrat.p,lower.tail=rat.neg)
+      res.lm['is.significant'] <- res.lm['p.value'] < sign.level.sample
+    }
+  }
+  res.lm
+}
+
+.calc.weighted.lm <- function(channel1,channel2,var.i,
+                              sign.level.rat,sign.level.sample,ratiodistr) {
+  res.lm <- NA
+  if (any(!is.na(channel1) & !is.na(channel2))){
+    fm <- lm(channel2~channel1+0,
+             weights=1/var.i)
+    summary.fm <- summary.lm(fm)$coefficients
+    ci <- confint(fm,level=1-sign.level.rat)
+    res.lm <- c(lratio=log10(summary.fm[1]),
+                ratio=summary.fm[1],
+                stderr=summary.fm[2],
+                ratio.ci.l=ci[1],
+                ratio.ci.u=ci[2])
+
+    if (!is.null(ratiodistr)) {
+      rat.neg <- log10(res.lm['ratio']) < distr::q(ratiodistr)(0.5)
+      ci[ci < 0] <- 0
+      # TODO: fix confidence interval which goes to minus
+      #message(paste(ci,collapse=":"))
+      lrat.p <- log10(ifelse(rat.neg,ci[2],ci[1]))
+      res.lm['p.value'] <- distr::p(ratiodistr)(lrat.p,lower.tail=rat.neg)
+      res.lm['is.significant'] <- res.lm['p.value'] < sign.level.sample
+    }
+  }
+  res.lm
+}
+
+
+
+.calc.w.na <- function() {
+  # Require channel intensity to be outside of the 'NA region'
+  sel.ch1na <- sel.ch1na & i2 > quantile(naRegion(noise.model),prob=0.99)
+  sel.ch2na <- sel.ch2na & i1 > quantile(naRegion(noise.model),prob=0.99)
+
+  # Set the value of that channel to a rather high one
+  val <- quantile(naRegion(noise.model),prob=0.5)
+
+  # Require the ratio to be higher than the previously observed one
+  # TODO: handle case when we have no ratio
+  if (!is.na(lratio.n.var['lratio'])) {
+    if (lratio.n.var['lratio'] < 0) {
+      
+      sel.ch1na <- sel.ch1na & i2 - val < lratio.n.var['lratio']
+      sel.ch2na <- sel.ch2na & val - i1 < lratio.n.var['lratio']
+    } else {
+      sel.ch1na <- sel.ch1na & i2 - val > lratio.n.var['lratio']
+      sel.ch2na <- sel.ch2na & val - i1 > lratio.n.var['lratio']
+    }
+  }
+
+#  i1[sel.ch1na] <- max(val,i2[sel.ch1na]-10)
+#  i2[sel.ch2na] <- max(val,i1[sel.ch2na]-10)
+#  i1.raw[sel.ch1na] <- max(val,i2[sel.ch1na]-10)
+#  i2.raw[sel.ch2na] <- max(val,i1[sel.ch2na]-10)
+  
+  i1[sel.ch1na] <- val
+  i2[sel.ch2na] <- val
+  i1.raw[sel.ch1na] <- i2.raw[sel.ch1na]
+  i2.raw[sel.ch2na] <- i1.raw[sel.ch2na]
+
+  sel <- sel.notna | sel.ch1na | sel.ch2na
+#  message("ch1na: ",sum(sel.ch1na),"; ch2na: ",sum(sel.ch2na))
+
+  # calculate final ratio
+  lratio.n.var <- 
+    .calc.weighted.ratio(sel,i1,i2,var.i,
+                         remove.outliers,outliers.coef,outliers.trim,
+                         variance.function,preweights)
+}
+
 .get.ri <- function(ri,ch) {
   if (ch == "ALL")
     rowSums(ri,na.rm=TRUE)
+  else if (ch == "AVG")
+    apply(ri,1,mean,na.rm=TRUE)
   else
     ri[,ch]
 }
 
-                           
-.calc.weighted.ratio <- function(sel,i1,i2,variance,
-                                 remove.outliers,outliers.coef,outliers.trim,
-                                 variance.function) {
-  
-  log.ratio <- i2[sel] - i1[sel]
-  variance <- variance[sel]
-  
-  if (remove.outliers) {
-    # TODO: Weighted outlier removal
-    if (outliers.trim == 0) {
-      # use box-plot method
-      bp <- boxplot.stats(log.ratio,coef=outliers.coef)
-      sel.or <- (log.ratio >= bp$stats[1]) & (log.ratio <=bp$stats[5])
-    } else {
-      # use trim method
-      sel.or <- log.ratio > quantile(log.ratio,outliers.trim) & 
-                log.ratio < quantile(log.ratio,1-outliers.trim)
-    }
-    log.ratio <- log.ratio[sel.or]
-    variance <- variance[sel.or]
+.sel.outliers <- function(log.ratio,outliers.coef,outliers.trim=0) {
+  # TODO: Weighted outlier removal
+  if (outliers.trim == 0) {
+    # use box-plot method
+    bp <- boxplot.stats(log.ratio,coef=outliers.coef)
+    sel.or <- (log.ratio >= bp$stats[1]) & (log.ratio <=bp$stats[5])
+  } else {
+    # use trim method
+    sel.or <- log.ratio > quantile(log.ratio,outliers.trim,na.rm=TRUE) & 
+              log.ratio < quantile(log.ratio,1-outliers.trim,na.rm=TRUE)
   }
-
+  is.na(log.ratio) | !sel.or
+}
+                           
+.calc.weighted.ratio <- function(log.ratio,variance,
+                                 variance.function,preweights=NULL) {
+  
+  variance <- variance
+  preweights <- preweights
+  
   weights <- 1/variance
+  if (!is.null(preweights))
+    weights <- weights*preweights
   sum.weights <- sum(weights)
   weighted.ratio <- weightedMean(log.ratio,weights)
 
@@ -511,18 +573,28 @@ setMethod("estimateRatio",
           signature(ibspectra="IBSpectra",noise.model="ANY",
                     channel1="missing",channel2="missing",
                     protein="character",peptide="missing"),
-          function(ibspectra,noise.model=NULL,protein,val="lratio",summarize=FALSE,...) {
+          function(ibspectra,noise.model=NULL,protein,val="lratio",summarize=FALSE,combine=TRUE,..) {
             channels <- reporterTagNames(ibspectra)
-            res <- matrix(NA,nrow=length(channels),ncol=length(channels),dimnames=list(channels,channels))
-            for(channel1 in channels)
-              for (channel2 in channels) {
-                rat <- estimateRatio(ibspectra,noise.model=noise.model,
-                                     channel1=channel1,channel2=channel2,
-                                     protein=protein,...)
-                res[channel1,channel2] <- rat[val]
-              }
-            return(res)
-          }
+            if (combine) {
+              res <- matrix(NA,nrow=length(channels),ncol=length(channels),dimnames=list(channels,channels))
+              for(channel1 in channels)
+                for (channel2 in channels) {
+                  rat <- estimateRatio(ibspectra,noise.model=noise.model,
+                                       channel1=channel1,channel2=channel2,
+                                       protein=protein,...)
+                  res[channel1,channel2] <- rat[val]
+                }
+              return(res)
+            } else {
+              cmbn <- t(combn(channels,2))
+              res <- estimateRatio(ibspectra,noise.model=noise.model,
+                                   channel1=cmbn[i,1],channel2=cmbn[i,2],
+                                   protein=protein,combine=FALSE,...)
+
+              apply(cmbn,1,function(i) 
+                    cbind(r1=cmbn[i,1],r2=cmbn[i,2],ac=rownames(res),res))
+            }
+            }
 )
 
 
@@ -585,37 +657,51 @@ setMethod("estimateRatio",
 .call.estimateRatio <- function(x,level,ibspectra,noise.model,
                                 channel1,channel2,
                                 specificity=REPORTERSPECIFIC,modif=NULL,
-                                n.sample=NULL,
-                                groupspecific.if.same.ac=FALSE,...) {
+                                n.sample=NULL,groupspecific.if.same.ac=FALSE,
+                                use.precursor.purity=FALSE,do.warn=TRUE,...) {
+  allowed.channels <- c(reporterTagNames(ibspectra),'AVG','ALL')
   if (is.null(channel1) || is.null(channel2))
-    stop("channel1 and channel2 must not be NULL, but one of [",paste(reporterTagNames(ibspectra),collapse=", "),"] !")
-  if (length(channel1) == 0 || length(channel1) > 1 || length(channel2) == 0 || length(channel2) > 1)
-    stop("channel1 and channel2 must be of length one! Lengths: [",length(channel1),",",length(channel2),"]")
-  if (!all(channel1 %in% reporterTagNames(ibspectra)) || !all(channel2 %in% reporterTagNames(ibspectra)))
-    stop("channel1 and channel2 must be one of the reporter names: ",paste(reporterTagNames(ibspectra),collapse=", "),".")
+    stop("channel1 and channel2 must not be NULL, but one of [",paste(allowed.channels,collapse=", "),"] !")
+  #if (length(channel1) == 0 || length(channel1) > 1 || length(channel2) == 0 || length(channel2) > 1)
+  #  stop("channel1 and channel2 must be of length one! Lengths: [",length(channel1),",",length(channel2),"]")
+  if (!all(channel1 %in% allowed.channels) || !all(channel2 %in% allowed.channels))
+    stop("channel1 and channel2 must be one of the reporter names: \n\t",paste(allowed.channels,collapse=", "),".")
   
   if (length(channel1) > 1 || length(channel2) > 1) {
-    ##TTTT 
-    ## TODO
-  } 
-  if (level=="protein") {
-    ri <- reporterIntensities(ibspectra,protein=x,specificity=specificity,
-                              modif=modif,groupspecific.if.same.ac=groupspecific.if.same.ac)
-    ri.raw <- reporterData(ibspectra,element="ions_not_normalized",protein=x,specificity=specificity,modif=modif,
-                           groupspecific.if.same.ac=groupspecific.if.same.ac)
+    res  <- c()
+    for (c1 in channel1) {
+      for (c2 in channel2) {
+        res <- rbind(res,data.frame(channel1=c1,channel2=c2,
+                                    t(as.data.frame(.call.estimateRatio(x,level,ibspectra,noise.model,channel1=c1,channel2=c2,
+                                                                        specificity,modif,n.sample,groupspecific.if.same.ac,
+                                                                        use.precursor.purity,do.warn=do.warn,...))),
+                                    stringsAsFactors=FALSE))
+      }
+    }
+    rownames(res) <- NULL
+    return(res)
   }
-  if (level=="peptide") {
-    ri <- reporterIntensities(ibspectra,peptide=x,modif=modif)
-    ri.raw <- reporterData(ibspectra,element="ions_not_normalized",peptide=x,modif=modif)
-  }
+  if (level=="protein")
+    sel <- spectrumSel(ibspectra,protein=x,specificity=specificity,do.warn=do.warn,
+                       modif=modif,groupspecific.if.same.ac=groupspecific.if.same.ac)
+  if (level=="peptide") 
+    sel <- spectrumSel(ibspectra,peptide=x,modif=modif,do.warn=do.warn)
+  
+  ri <- reporterIntensities(ibspectra)[sel,,drop=FALSE]
+  ri.raw <- reporterData(ibspectra,element="ions_not_normalized")[sel,,drop=FALSE]
+  if (use.precursor.purity && .SPECTRUM.COLS['PRECURSOR.PURITY'] %in% colnames(fData(ibspectra)))
+    precursor.purity <- fData(ibspectra)[sel,"precursor.purity"]
+  else
+    precursor.purity <- NULL
+
   ## TODO: implement n.sample
   i1 <- .get.ri(ri,channel1)
   i2 <- .get.ri(ri,channel2)
 
   if (is.null(ri.raw)) {
-    estimateRatioNumeric(channel1=i1,channel2=i2,noise.model=noise.model,...)
+    estimateRatioNumeric(channel1=i1,channel2=i2,noise.model=noise.model,...,preweights=precursor.purity)
   } else {
-    estimateRatioNumeric(channel1=i1,channel2=i2,noise.model=noise.model,...,
+    estimateRatioNumeric(channel1=i1,channel2=i2,noise.model=noise.model,...,preweights=precursor.purity,
                   channel1.raw=.get.ri(ri.raw,channel1),
                   channel2.raw=.get.ri(ri.raw,channel2))
   }
@@ -682,25 +768,33 @@ combn.matrix <- function(x,method="global",cl=NULL,vs=NULL) {
     stop(sprintf("cl argument does not have the same length as x (cl: %s, x: %s).",
                  length(cl),length(x)))
 
+  if (!is.null(vs) && !is.character(vs))
+    vs <- as.character(vs)
+
   # create a combn matrix with all combinations of channels to consider 
   if (method == "versus.class" || method == "versus.channel") {
     if (is.null(vs)) stop("vs argument may not be null when method is versus")
     if (method == "versus.channel") {
       if (!vs %in% x) stop("vs argument must be one of [",paste(x,collapse=", "),"]")
       pos <- which(x==vs)
-      combn <- rbind(vs,x[-pos])
+      cmbn <- rbind(vs,x[-pos])
       if (!is.null(cl)) {
         vs.class <- cl[pos]
-        combn <- rbind(combn,vs.class,cl[-pos])
+        cmbn <- rbind(cmbn,vs.class,cl[-pos])
       }
     }
     if (method == "versus.class") {
-      # TODO
+      if (!all(vs %in% cl)) stop("vs argument must be one of [",paste(cl,collapse=", "),"]")
+      if (is.null(cl)) stop("class labels must be given with method versus.class")
+      pos <- which(cl==vs)
+      cmbn <- rbind(x[pos],rep(x[-pos],each=length(pos)))
+      cmbn <- rbind(cmbn,vs,rep(cl[-pos],each=length(pos)))
+
     }
   } else if (method == "global") {
-    combn <- combn(x,2) # take all combinations
+    cmbn <- combn(x,2) # take all combinations
     if (!is.null(cl))
-      combn <- rbind(combn,combn(cl,2))
+      cmbn <- rbind(cmbn,combn(cl,2))
   } else {
     x <- x[!is.na(cl)]
     cl <- cl[!is.na(cl)]
@@ -711,24 +805,24 @@ combn.matrix <- function(x,method="global",cl=NULL,vs=NULL) {
         warning("Some class labels are not repeated - ",
                 "those are ignored in intraclass ratios.")
           
-      combn <- do.call(cbind,lapply(names(t)[t>1],
+      cmbn <- do.call(cbind,lapply(names(t)[t>1],
                                     function(xx) rbind(combn(x[which(cl==xx)],2),class1=xx,class2=xx)))
       
     } else if (method == "interclass") {
       if (length(t) == 1) {
         warning("Cannot compute interclass ratios when there is only one class - taking ratios vs ALL")
-        combn <- matrix(c(x,rep("ALL",length(x))),nrow=2,byrow=TRUE)
+        cmbn <- matrix(c(x,rep("ALL",length(x))),nrow=2,byrow=TRUE)
       } else {
-        combn <- matrix(nrow=4,ncol=0)
+        cmbn <- matrix(nrow=4,ncol=0)
         for (name in names(t)) {
           pos=which(cl==name);posn=which(cl!=name);
           for (i in pos) 
             for (j in posn) {
               cc <- c(x[i],x[j],cl[i],cl[j])
-              if (ncol(combn) > 0 &
-                  any(apply(combn,2,function(xx) identical(rev(cc[1:2]),xx[1:2]))))
+              if (ncol(cmbn) > 0 &
+                  any(apply(cmbn,2,function(xx) identical(rev(cc[1:2]),xx[1:2]))))
                 next;
-              combn <- cbind(combn,cc)
+              cmbn <- cbind(cmbn,cc)
             }
         }
       }
@@ -736,7 +830,9 @@ combn.matrix <- function(x,method="global",cl=NULL,vs=NULL) {
       stop(paste("method",method,"not implemented."))
     }
   }
-  return(combn)
+  if (nrow(cmbn) == 2) rownames(cmbn) <- c("r1","r2")
+  else if (nrow(cmbn) == 4) rownames(cmbn) <- c("r1","r2","class1","class2")
+  return(cmbn)
 }
 
 ## create a table with all protein ratios
@@ -760,6 +856,10 @@ combn.protein.tbl <- function(ibspectra,noise.model,ratiodistr,
       rownames(r) <- "prot1"
     }
     df <- as.data.frame(r,stringsAsFactors=FALSE)
+    if (is.null(rownames(r))) {
+      print(head(df))
+      #stop("no row.names present!!")
+    }
     df$ac <- rownames(df)
 
     if (is.matrix(attr(r,"input")))
@@ -793,18 +893,42 @@ peptideRatios <- function(ibspectra,...,protein=NULL,peptide=peptides(proteinGro
   proteinRatios(ibspectra,...,proteins=protein,peptide=peptide)
 }
 
-ratiosReshapeWide <- function(quant.tbl,grouped.cols=TRUE) {
+ratiosReshapeWide <- function(quant.tbl,grouped.cols=TRUE,vs.class=NULL,sep=".",cmbn=NULL,short.names=FALSE) {
   attrs <- attributes(quant.tbl)
-  quant.tbl$comp <- paste(quant.tbl$r2,quant.tbl$r1,sep="/")
+
+  if (!is.null(cmbn)) {
+    sel <- paste(quant.tbl$r1,quant.tbl$r2) %in% paste(cmbn[1,],cmbn[2,])
+    quant.tbl <- quant.tbl[sel,]
+  }
+  classes.unique <- "class1" %in% colnames(quant.tbl) &&
+                    !any(is.na(quant.tbl$class1)) && !any(is.null(quant.tbl$class1)) && 
+                    all(table(unique(quant.tbl[,c("r1","class1")])$class1)==1) &&
+                    all(table(unique(quant.tbl[,c("r2","class2")])$class2)==1)
+
+  if (!is.null(vs.class)) {
+    if (!any(quant.tbl[,"class1"]==vs.class)) stop("vs.class set to ",vs.class,", but it is not present in quant table")
+    if (length(vs.class)==1 && short.names)
+      quant.tbl$comp <- paste(quant.tbl$class2)
+    else 
+      quant.tbl$comp <- paste(quant.tbl$class2,quant.tbl$class1,sep="/")
+
+    quant.tbl <- subset(quant.tbl,class1 %in% vs.class)
+  } else {
+    if (classes.unique) {
+      quant.tbl$comp <- paste(quant.tbl$class2,quant.tbl$class1,sep="/")
+    } else {
+      quant.tbl$comp <- paste(quant.tbl$r2,quant.tbl$r1,sep="/")
+    }
+  }
   quant.tbl  <- quant.tbl[,-(c(which(colnames(quant.tbl) %in% c("r1","r2","class1","class2"))))]
-  v.names <- c("lratio","variance","n.spectra","p.value.rat","p.value.sample","is.significant","sd")
+  v.names <- c("lratio","variance","n.spectra","p.value.rat","p.value.sample","is.significant","sd","n.na1","n.na2")
   v.names <- v.names[v.names %in% colnames(quant.tbl)]
   if ("n.pos" %in% colnames(quant.tbl)) v.names <- c(v.names,"n.pos")
   if ("n.neg" %in% colnames(quant.tbl)) v.names <- c(v.names,"n.neg")
   timevar <- "comp"
   idvar <- colnames(quant.tbl)[!colnames(quant.tbl) %in% c(timevar,v.names)]
 
-  res <- reshape(quant.tbl,v.names=v.names,idvar=idvar,timevar=timevar,direction="wide")
+  res <- reshape(quant.tbl,v.names=v.names,idvar=idvar,timevar=timevar,direction="wide",sep=sep)
   if (grouped.cols) {
     col.order <- c(idvar,
                    unlist(lapply(v.names,function(n) grep(n,colnames(res),fixed=TRUE,value=TRUE))))
@@ -820,7 +944,7 @@ proteinRatios <-
            reporterTagNames=NULL,
            proteins=reporterProteins(proteinGroup(ibspectra)),peptide=NULL,
            cl=classLabels(ibspectra),
-           method="global",symmetry=FALSE,
+           combn.method="global",symmetry=FALSE,
            summarize=FALSE,summarize.method="mult.pval",
            min.detect=NULL,strict.sample.pval=TRUE,strict.ratio.pval=TRUE,orient.div=0,
            sign.level=0.05,sign.level.rat=sign.level,sign.level.sample=sign.level,
@@ -835,18 +959,19 @@ proteinRatios <-
     if (!is.null(p.adjust) && !p.adjust %in% p.adjust.methods)
       stop("p.adjust parameter must be one of '",paste(p.adjust.methods,collapse="','"),"'")
     
-    #if (summarize && method=="interclass" && length(unique(cl[!is.na(cl)])) != 2)
+    #if (summarize && combn.method=="interclass" && length(unique(cl[!is.na(cl)])) != 2)
     #  stop("Usage of inter-class ratios with summarize when having more than two classes is not supported ATM, sorry.",
     #       " class labels: ",paste(cl,collapse=", "))
 
     if (is.null(reporterTagNames)) reporterTagNames <- reporterTagNames(ibspectra)
+    if (is.null(cl) && is.null(combn)) stop("please supply class labels as argument cl or a combn matrix")
 
     if (is.null(combn))
-      combn <- combn.matrix(reporterTagNames,method,cl)
+      combn <- combn.matrix(reporterTagNames,combn.method,cl)
 
     if (ncol(combn) < 1) 
       stop("No possible combination for reporters [",paste(reporterTagNames,sep=","),"]",
-           " w/ classes [",paste(cl,sep=","),"] and method ",method," possible.",
+           " w/ classes [",paste(cl,sep=","),"] and combn.method ",combn.method," possible.",
            " summarize=",ifelse(summarize,"TRUE","FALSE"))
     
     ratios <- combn.protein.tbl(ibspectra,noise.model,ratiodistr,proteins,combn,
@@ -854,13 +979,14 @@ proteinRatios <-
                                 variance.function=variance.function,combine=combine,...)
 
     if (summarize) {
-      if (method=="global")
-        stop("summarization not meaningful with method='global'. ",
-             "Use method='intraclass' or method='interclass' to use ratios in or between classes.")
+      if (combn.method=="global")
+        stop("summarization not meaningful with combn.method='global'. ",
+             "Use combn.method='intraclass' or combn.method='interclass' to use ratios in or between classes.")
 
-      if (is.null(min.detect)) min.detect <- ncol(combn)
-      n.combination <- ncol(combn)
-      if (n.combination < 2) 
+      #n.combination <- length(unique(combn[1,]))
+      n.combination <- table(combn["class1",],combn["class2",])
+      if (nrow(n.combination)==1 & ncol(n.combination)==1) n.combination <- as.numeric(n.combination)
+      if (max(n.combination) < 2)
         stop("Summarize=TRUE makes no sense with only one combination, set summarize to FALSE or class labels differently.")
 
       if (is.null(min.detect))
@@ -873,7 +999,7 @@ proteinRatios <-
                              ratiodistr=ratiodistr)
 
       attributes(df) = c(attributes(df),list(
-          classLabels=cl,combn.method=method,symmetry=symmetry,
+          classLabels=cl,combn.method=combn.method,symmetry=symmetry,
           summarize=TRUE,summarize.method=summarize.method,
           min.detect=min.detect,
           strict.sample.pval=strict.sample.pval,
@@ -894,7 +1020,7 @@ proteinRatios <-
       }
 
       attributes(ratios) = c(attributes(ratios),list(
-          classLabels=cl,combn.method=method,symmetry=symmetry,
+          classLabels=cl,combn.method=combn.method,symmetry=symmetry,
           sign.level.rat=sign.level.rat,sign.level.sample=sign.level.sample,
           ratiodistr=ratiodistr,variance.function=variance.function,
           combine=combine,p.adjust=p.adjust,reverse=reverse))
@@ -918,8 +1044,12 @@ summarize.ratios <-
       stop("ratios must specify classes w/ columns class1 and class2!")
 
     classes <- unique(ratios[,c("class1","class2")])
-    if (is.null(n.combination))
-      n.combination <- length(classes)
+    
+    if (is.null(n.combination)) {
+      cc <- unique(ratios[c("r1","r2","class1","class2"),])
+      n.combination <- table(cc["class1",],cc["class2",])
+      if (nrow(n.combination)==1 & ncol(n.combination)==1) n.combination <- as.numeric(n.combination)
+    }
     if (is.null(min.detect))
       min.detect <- n.combination
 
@@ -933,6 +1063,8 @@ summarize.ratios <-
         do.call(rbind,lapply(seq_len(nrow(classes)),function(class_i) {
           class1 <- classes[class_i,1]
           class2 <- classes[class_i,2]
+          n.combination.c <- ifelse(is.matrix(n.combination),n.combination[class2,class1],n.combination)
+          min.detect.c <- ifelse(is.matrix(min.detect),min.detect[class2,class1],min.detect)
           ac.sel <-ac.sel.1 & ratios$class1 == class1 & ratios$class2 == class2
           if (!any(ac.sel)) {
             ## no data for ac
@@ -988,7 +1120,7 @@ summarize.ratios <-
             prod(p(ratiodistr)(ac.ratios,lower.tail=n.neg>n.pos))
         
           if (strict.sample.pval) {
-            p.value.sample <- getMultUnifPValues(product.p.vals*0.5^(n.combination-sum(ac.sel)),n=n.combination)
+            p.value.sample <- getMultUnifPValues(product.p.vals*0.5^(n.combination.c-sum(ac.sel)),n=n.combination.c)
           } else {
             p.value.sample <- getMultUnifPValues(product.p.vals,
                                                  n=sum(ac.sel))
@@ -997,7 +1129,7 @@ summarize.ratios <-
           ## significance
           is.significant <- (p.value.sample <= sign.level.sample) &&
             (p.value.rat <= sign.level.rat) &&
-            (sum(ac.sel) >= min.detect) &&
+            (sum(ac.sel) >= min.detect.c) &&
             (is.pos | is.neg)
 
           return(list(ac=ac,lratio=lratio,variance=variance,
