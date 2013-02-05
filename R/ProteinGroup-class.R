@@ -164,6 +164,7 @@ setMethod("ProteinGroup",signature(from="data.frame",template="missing",proteinI
         spectrumId <- unique(from[,c("spectrum","peptide","modif")])
         peptideInfo <- unique(from[,c("protein","peptide","start.pos","modif")])
       } else {
+        spectrumId <- unique(from[,c("spectrum","peptide")])
         peptideInfo <- unique(from[,c("protein","peptide","start.pos")])
       }
       peptideInfo <- peptideInfo[order(peptideInfo[,"protein"],
