@@ -1,3 +1,7 @@
+CHANGES IN VERSION 1.12.1
+-------------------------
+ - Fix TMT 10-plex tags: The masses for N and C tags were interchanged! Please re-run any TMT 10-plex analysis with this version.
+
 CHANGES IN VERSION 1.9.3
 ------------------------
  - allow the use of a combination matrix in NoiseModel reporterTagNames
