@@ -322,7 +322,7 @@ writeHscoreData <- function(outfile,ids,massfile="defs.txt") {
 
 readPhosphoRSOutput <- function(phosphoRS.outfile,simplify=FALSE,pepmodif.sep="##.##",
                                 besthit.only=TRUE) {
-  require(XML)
+  requireNamespace("XML")
   doc <- xmlTreeParse(phosphoRS.outfile,useInternalNodes=TRUE)  
   spectra <- xmlRoot(doc)[["Spectra"]]
   res <- xmlApply(spectra,function(spectrum) {
@@ -458,7 +458,7 @@ observedKnownSites <- function(protein.group,protein.g,ptm.info,modif,modificati
 
 
 .proteinPtmInfo <- function(isoform.ac,protein.group,ptm.info,modif,modification.name=NULL,simplify=TRUE) {
-  require(OrgMassSpecR)
+  requireNamespace("OrgMassSpecR")
   if (length(proteinInfo(protein.group)) == 0)
     stop("no protein info attached to protein.group: see ?getProteinInfoFromUniprot on how to get it.")
 

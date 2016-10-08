@@ -1,7 +1,7 @@
 create.meta.reports <- function(properties.file="meta-properties.R",
                                 global.properties.file=system.file("report","meta-properties.R",package="isobar"),
                                 args=NULL,include.not.localized=FALSE,...) {
-  require(ggplot2)
+  requireNamespace(ggplot2)
   if (!exists("properties.env")) {
     properties.env <- load.properties(properties.file,global.properties.file,
                                       args=args,...)
@@ -251,7 +251,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 }
 
 .plot.heatmaps.gd <- function(ratio.matrix,variance.matrix,name) {
-  require(gplots)
+  requireNamespace(gplots)
   breaks <- seq(from=-max(abs(ratio.matrix)),to=max(abs(ratio.matrix)),length.out=51)
   pdf(sprintf("heatmap_%s.pdf",name),width=15,height=30,title=name)
   min.max <- quantile(ratio.matrix,probs=c(0.0005,0.9995))
@@ -272,7 +272,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
   }
   dev.off()
 
-  library(boot)
+  requireNamespace("boot")
 
   cols <- colnames(ratio.matrix)
   correlation.matrix <- sapply(cols ,function(i) sapply(cols,function(j) boot::corr(ratio.matrix[,c(i,j)],
@@ -287,7 +287,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 
 
 .plot.heatmaps <- function(ratio.matrix,normalized.ratio.matrix,variance.matrix,name) {
-  require(gplots)
+  requireNamespace(gplots)
   breaks <- seq(from=-max(abs(ratio.matrix)),to=max(abs(ratio.matrix)),length.out=51)
   pdf(sprintf("heatmap_%s.pdf",name),width=15,height=30,title=name)
   heatmap.2(ratio.matrix,Colv=NA,col=greenred(50),margins=c(5,25),main=paste(name),
@@ -320,7 +320,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
   }
   dev.off()
 
-  library(boot)
+  requireNamespace("boot")
   cols <- colnames(ratio.matrix)
   correlation.matrix <- sapply(cols ,function(i) sapply(cols,function(j) boot::corr(ratio.matrix[,c(i,j)],
                                                             w=apply(1/variance.matrix,1,median))))
@@ -342,7 +342,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 }
 
 .plot.pairs <- function(ratio.matrix,variance.matrix,name) {
-  require(RColorBrewer)
+  requireNamespace(RColorBrewer)
   weights <- apply(1/variance.matrix,1,median)
   weights <- weights/sum(weights)
   
@@ -359,7 +359,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 }
 
 .panel.cor <- function(x, y, digits=2, prefix="", cex.cor, weights, ...)  {
-  library(boot)
+  requireNamespace("boot")
   usr <- par("usr"); on.exit(par(usr))
   par(usr = c(0, 1, 0, 1))
   r <- abs(boot::corr(matrix(c(x,y),ncol=2),w=weights))

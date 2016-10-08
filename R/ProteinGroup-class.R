@@ -419,7 +419,6 @@ getProteinInfoFromBiomart <- function(x,database="Uniprot") {
   protein.info <- data.frame(accession=c(),name=c(),protein_name=c(),
                              gene_name=c(),organism=c())
   if (database == "Uniprot") {
-    #require(biomaRt)
     tryCatch({
       mart <- biomaRt::useMart("uniprot_mart",dataset="UNIPROT",
                       host="www.ebi.ac.uk",path="/uniprot/biomart/martservice")
@@ -499,7 +498,7 @@ getProteinInfoFromUniprot <-
 }
 
 getProteinInfoFromEntrez <- function(x,splice.by=200) {
-  require(XML)
+  requireNamespace("XML")
 
   eutils.url <- "http://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=protein&id="
   if (is.character(x))
@@ -568,7 +567,7 @@ proteinInfoIsOnSpliceVariants <- function(protein.info) {
 
 
 getProteinInfoFromBioDb <- function(x,...,con=NULL) {
-  library(DBI)
+  requireNamespace("DBI")
   if (is.null(con)) {
     con <- dbConnect(...)
     do.disconnect <- TRUE
@@ -656,7 +655,7 @@ getPtmInfoFromNextprot <- function(protein.group,
                                    nextprot.url="http://www.nextprot.org/rest/entry/NX_XXX/ptm?format=json",
                                    url.wildcard="XXX") {
   protein.acs <- unique(protein.group@isoformToGeneProduct$proteinac.wo.splicevariant)
-  require(RJSONIO)
+  requireNamespace("RJSONIO")
   pb <- txtProgressBar(max=length(protein.acs),style=3)
 
   nextprot.ptmInfo <- 
@@ -1759,15 +1758,15 @@ observable.peptides <- function(seq,nmc=1,min.length=6,min.mass=600,max.mass=400
   if (is.na(seq) || length(seq)==0 || nchar(seq) == 0)
     return(0)
   seq <- gsub("[ ,]","",seq)
-  require(OrgMassSpecR)
-  pep <- Digest(seq,missed=nmc,custom=custom,...)
+  requireNamespace("OrgMassSpecR")
+  pep <- OrgMassSpecR::Digest(seq,missed=nmc,custom=custom,...)
   min.length.ok <- nchar(pep[,"peptide"]) >= min.length
   mass.ok <- pep[,"mz1"] >= min.mass & pep[,"mz3"] <= max.mass
   pep[min.length.ok & mass.ok,]
 }
 
 .calculate.mw <- function(protein.group,protein.g,combine.f=mean) {
-  require(OrgMassSpecR)
+  requireNamespace("OrgMassSpecR")
   sequences <- proteinInfo(protein.group)$sequence
   ip <- indistinguishableProteins(protein.group)
   names(sequences) <- proteinInfo(protein.group)$accession

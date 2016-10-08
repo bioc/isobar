@@ -1,13 +1,30 @@
-# IMPORT
 import("methods")
-importClassesFrom(Biobase, AnnotatedDataFrame, AssayData, eSet, 
-                  Versioned, VersionedBiobase, Versions)
 
-import("distr")
+importFrom("grDevices", "boxplot.stats", "dev.off", "pdf", "png")
+importFrom("graphics", "abline", "axTicks", "axis", "hist", "legend",
+           "lines", "pairs", "par", "points", "rect", "strwidth",
+           "text")
+importFrom("stats", "IQR", "confint", "dcauchy", "dnorm", "dt",
+           "hclust", "integrate", "lm", "mad", "median", "nlminb",
+           "p.adjust", "p.adjust.methods", "pchisq", "pnorm", "pt",
+           "qnorm", "qt", "quantile", "reshape", "rt", "setNames",
+           "summary.lm", "t.test", "var")
+importFrom("utils", "Sweave", "URLdecode", "URLencode",
+           "capture.output", "combn", "compareVersion",
+           "download.file", "head", "packageDescription", "read.delim",
+           "read.table", "setTxtProgressBar", "tail", "txtProgressBar",
+           "write.table", "zip")
+
+importFrom("biomaRt", useMart, getBM)
+importFrom("distr", Norm, df, location, "df<-", "location<-", "scale",
+           "scale<-")
+import("Biobase")
 import("plyr")
+import("ggplot2")
+importFrom("graphics", "plot")
+importFrom("stats", "sd")
 
-# EXPORT
-exportClasses(IBSpectra,ProteinGroup)
+exportClasses(IBSpectra, ProteinGroup)
 exportMethods("as.data.frame")
 
 export(IBSpectraTypes)

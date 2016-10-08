@@ -1,3 +1,8 @@
+CHANGES IN VERSION 1.19.1
+-------------------------
+ - Fix error in subsetIBSpectra and exclude and namespace imports
+  (Laurent Gatto <2016-10-07 Fri>)
+
 CHANGES IN VERSION 1.17.1
 -------------------------
  - Fixed critical bug in isotope impurity correction method. 

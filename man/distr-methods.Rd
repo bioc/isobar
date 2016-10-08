@@ -4,6 +4,12 @@
 \alias{calcProbXGreaterThanY}
 \alias{calcProbXDiffNormals}
 \alias{calcCumulativeProbXGreaterThanY}
+
+\alias{UnivariateDistribution-class}
+\alias{AbscontDistribution-class}
+\alias{Parameter-class}
+\alias{Distribution-class}
+
 \title{Functions for distribution calculations
 }
 \description{
@@ -36,6 +42,7 @@
 \author{ Florian P. Breitwieser }
 
 \examples{
+  library(distr)
   calcProbXGreaterThanY(Norm(0,.25),Norm(1,.25))
 }
 

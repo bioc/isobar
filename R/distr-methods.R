@@ -10,7 +10,6 @@ calcProbXDiffNormals <- function(X,mu_Y,sd_Y,...,alternative=c("greater","less",
 	return(rep(NA,seq_along(mu_Y)))
   }
 
-  require(distr)
   if (!is(X,"Distribution")) stop("X has to be of class Distribution (is ",class(X),")")
 
   if (length(mu_Y) != length(sd_Y)) 
@@ -44,10 +43,8 @@ calcProbXDiffNormals <- function(X,mu_Y,sd_Y,...,alternative=c("greater","less",
   p.values
 }
 
-calcProbXGreaterThanY <- function(X, Y, rel.tol=.Machine$double.eps^0.25, subdivisions=100L)
-{
+calcProbXGreaterThanY <- function(X, Y, rel.tol=.Machine$double.eps^0.25, subdivisions=100L) {
   # numerically calculates P(X>=Y)
-  require(distr)
   if (!is(X,"Distribution")) stop("X has to be of class Distribution")
   if (!is(Y,"Distribution")) stop("Y has to be of class Distribution")
 #  return ( distr::p(Y-X)(0) ) # the easiest way, but it does not seem to give accurate results for Norm+Tlsd
@@ -60,7 +57,6 @@ calcProbXGreaterThanY <- function(X, Y, rel.tol=.Machine$double.eps^0.25, subdiv
 
 .calcProbXGreaterThanY.orig <- function(X,Y,min.q=10^-6, subdivisions=100L) {
   # numerically calculates P(X>=Y)
-  require(distr)
   if (!is(X,"Distribution")) stop("X has to be of class Distribution")
   if (!is(Y,"Distribution")) stop("Y has to be of class Distribution")
 
@@ -96,7 +92,6 @@ calcCumulativeProbXGreaterThanY <- function(Xs, mu_Ys, sd_Ys,
   alternative <- match.arg(alternative)
 
   # cumulative Y distribution is Gaussian with explicitly calculated parameters 
-  require(distr)
   inv_vars <- sd_Ys^(-2)
   var_Cum <- 1 / sum( inv_vars )
   mu_cum_Y <- sum( as.numeric( mu_Ys %*% inv_vars ) * var_Cum )
@@ -137,9 +132,6 @@ distrprint <- function(X,round.digits=5) {
 }
 
 twodistr.plot <- function(X,Y,n.steps=1000,min.q=10^-3) {
-  require(distr)
-  require(ggplot2)
-
   steps.seq <- seq(from=0,to=1,length.out=n.steps)
   steps <- sort(unique(c(q(X)(steps.seq),q(Y)(steps.seq))))
   ggplot(rbind(data.frame(x=steps,Distribution=paste0("X ~ ",distrprint(X)),density=d(X)(steps)),

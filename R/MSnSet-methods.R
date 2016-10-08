@@ -37,7 +37,7 @@ setAs("MSnSet","IBSpectra",function(from) {
 })
 
 setAs("IBSpectra","MSnSet",function(from) {
-  library(MSnbase)
+  requireNamespace("MSnbase")
   ## based on quantify.MSnExp from MSnbase
   
   elems <- assayDataElementNames(from)

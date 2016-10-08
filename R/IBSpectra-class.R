@@ -737,8 +737,9 @@ setMethod("exclude",
       #                            specificity=c(REPORTERSPECIFIC,GROUPSPECIFIC,UNSPECIFIC))
       
       # remove spectra from assayData
-      for (aden in assayDataElementNames(x)) {
-        assayDataElement(x,aden) <- assayDataElement(x,aden)[sel.spectra,]
+        for (aden in assayDataElementNames(x)) {
+            xel <- assayDataElement(x,aden)[sel.spectra,]
+            x <- assayDataElementReplace(x, aden, xel, FALSE)
       }
       
       # remove from featureData
@@ -757,7 +758,6 @@ setMethod("exclude",
 subsetIBSpectra <- 
   function(x, protein=NULL, peptide=NULL, direction="exclude",
            specificity=c(REPORTERSPECIFIC,GROUPSPECIFIC,UNSPECIFIC),...) {
-
   if ((is.null(protein) && is.null(peptide)) || (!is.null(protein) && !is.null(peptide)))
     stop("define either protein or peptide to include or exclude")
 
@@ -772,7 +772,8 @@ subsetIBSpectra <-
                          stop("direction must be either 'exclude' or 'include'."))
 
   for (aden in assayDataElementNames(x)) {
-    assayDataElement(x,aden) <- assayDataElement(x,aden)[sel.spectra,]
+     xel <- assayDataElement(x, aden)[sel.spectra, ]
+     x <- assayDataElementReplace(x, aden, xel, validate = FALSE)
   }
 
   pg.df <- as.data.frame(proteinGroup(x))

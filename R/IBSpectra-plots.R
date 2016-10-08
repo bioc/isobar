@@ -29,7 +29,6 @@ setMethod("reporterMassPrecision", signature=c(x="IBSpectra",plot="logical"),
       melt.masses$mass.difference <-
           melt.masses$observed.moz - rep(reporterTagMasses(x),each=nrow(masses))
       if (plot) {
-        require(ggplot2)
         melt.masses$reporter <-
           factor(melt.masses$reporter,
                  levels=reporterTagNames(x),
@@ -72,7 +71,6 @@ setMethod("reporterMassPrecision", signature=c(x="IBSpectra",plot="logical"),
 
 setMethod("reporterIntensityPlot",
           signature=c(x="IBSpectra"),function(x) {
-            require(ggplot2)
             intensities <- reporterIntensities(x)
             intensities.nn <- reporterData(x,element="ions_not_normalized") # null if not normalized
             

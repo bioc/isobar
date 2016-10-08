@@ -529,7 +529,7 @@ setMethod("readIBSpectra",
 
 ### READ MzID
 read.mzid <- function(filename) {
-  library(XML)
+  requireNamespace("XML")
   doc <- xmlInternalTreeParse(filename)
   ns <- c(x=xmlNamespace(xmlRoot(doc))[[1]])
 

@@ -5,7 +5,7 @@ Description: isobar provides methods for preprocessing, normalization, and
     proteomics data labeled with isobaric tags, such as iTRAQ and TMT.
     Features modules for integrating and validating PTM-centric datasets
     (isobar-PTM). More information on http://www.ms-isobar.org.
-Version: 1.19.0
+Version: 1.19.1
 Author: Florian P Breitwieser <florian.bw@gmail.com> and
    Jacques Colinge <jacques.colinge@inserm.fr>, with contributions from 
    Alexey Stukalov <stukalov@biochem.mpg.de>,
@@ -13,8 +13,8 @@ Author: Florian P Breitwieser <florian.bw@gmail.com> and
 Maintainer: Florian P Breitwieser <florian.bw@gmail.com>
 biocViews: Proteomics, MassSpectrometry, Bioinformatics, MultipleComparisons, QualityControl
 Depends: R (>= 2.10.0), Biobase, stats, methods
-Imports: distr, plyr
-Suggests: MSnbase, OrgMassSpecR, XML, biomaRt, ggplot2, RJSONIO, Hmisc, gplots, RColorBrewer, gridExtra, limma, boot, distr, DBI, MASS
+Imports: distr, plyr, biomaRt, ggplot2
+Suggests: MSnbase, OrgMassSpecR, XML, RJSONIO, Hmisc, gplots, RColorBrewer, gridExtra, limma, boot, DBI, MASS
 LazyLoad: yes
 License: LGPL-2
 URL: https://github.com/fbreitwieser/isobar
