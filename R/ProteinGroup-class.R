@@ -281,7 +281,7 @@ setMethod("ProteinGroup",signature(from="data.frame",template="missing",proteinI
       avail.peptides.n.prots <- subset(pep.n.prots,!peptide %in% grouped.peptides)
       ungrouped.peptides <- subset(pep.n.prots,!peptide %in% grouped.peptides)[["peptide"]]
 
-      while (length(ls(env=pgt[["prots.to.consider"]])) > 0) {
+      while (length(ls(envir=pgt[["prots.to.consider"]])) > 0) {
         sorted.proteins <- sort(unlist(eapply(pgt[["prots.to.consider"]],length)))
         my.protein.g <- names(sorted.proteins)[length(sorted.proteins)]
        
@@ -518,7 +518,7 @@ getProteinInfoFromEntrez <- function(x,splice.by=200) {
     cat(".")
 
     full.url <- paste0(eutils.url,paste(as.character(protein.acs[seq(from=i,to=min(length(protein.acs),i+splice.by-1))]),collapse=","))
-    res <- xmlToList(full.url)
+    res <- XML::xmlToList(full.url)
     res.l <- lapply(res, function(x) {
       unlist(setNames(lapply(x[names(x) != 'Id'], function(y) 
         if ('.attrs' %in% names(y) && y$.attrs['Name'] != 'Comment') 
@@ -569,7 +569,7 @@ proteinInfoIsOnSpliceVariants <- function(protein.info) {
 getProteinInfoFromBioDb <- function(x,...,con=NULL) {
   requireNamespace("DBI")
   if (is.null(con)) {
-    con <- dbConnect(...)
+    con <- DBI::dbConnect(...)
     do.disconnect <- TRUE
   } else {
     do.disconnect <- FALSE
@@ -585,9 +585,9 @@ getProteinInfoFromBioDb <- function(x,...,con=NULL) {
                  "  os AS organism, seqlength as length, sequence",
                  "FROM dbentries d ",
                  "WHERE dbid IN (2,3) AND primaryac IN (",paste0("'",protein.acs,"'",collapse=","),")")
-  res <- dbGetQuery(con,query)
+  res <- DBI::dbGetQuery(con,query)
   if (do.disconnect)
-    dbDisconnect(con)
+    DBI::dbDisconnect(con)
   attr(res,"on.splice.variant") <- TRUE
   return(res)
 }
@@ -661,7 +661,7 @@ getPtmInfoFromNextprot <- function(protein.group,
   nextprot.ptmInfo <- 
     lapply(seq_along(protein.acs),function(ac_i) {
            setTxtProgressBar(pb,ac_i)
-           tryCatch(fromJSON(sub(url.wildcard,protein.acs[ac_i],nextprot.url)),
+           tryCatch(RJSONIO::fromJSON(sub(url.wildcard,protein.acs[ac_i],nextprot.url)),
                     error=function(e) {
               if (isTRUE(getOption('isobar.verbose')))
                 warning("Could not fetch from ",
@@ -1778,7 +1778,7 @@ observable.peptides <- function(seq,nmc=1,min.length=6,min.mass=600,max.mass=400
 
   sapply(protein.g, function(my.protein.g) 
          do.call(mean,lapply(get.to.acs(my.protein.g),
-                                  function(protein.ac) MolecularWeight(formula = ConvertPeptide(sequences[protein.ac])))))
+                                  function(protein.ac) OrgMassSpecR::MolecularWeight(formula = OrgMassSpecR::ConvertPeptide(sequences[protein.ac])))))
 }
 
 calculate.emPAI <- function(protein.group,protein.g=reporterProteins(protein.group),

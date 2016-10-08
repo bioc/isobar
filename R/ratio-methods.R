@@ -551,7 +551,7 @@ correct.peptide.ratios <- function(ibspectra, peptide.quant.tbl, protein.quant.t
   } else if (method == "wtd.iqr") {
     # weighted implementation of iqr method with weighted quantiles
     requireNamespace("Hmisc")
-    qs <- wtd.quantile(log.ratio,weights,c(.25,.75),na.rm=TRUE)
+    qs <- Hmisc::wtd.quantile(log.ratio,weights,c(.25,.75),na.rm=TRUE)
     iqr <- qs[2] - qs[1]
     sel | log.ratio < qs[1]-outliers.coef*iqr | log.ratio > qs[3]+outliers.coef*iqr
   } else if (method == "robust.zscore") {

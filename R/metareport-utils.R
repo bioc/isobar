@@ -1,7 +1,7 @@
 create.meta.reports <- function(properties.file="meta-properties.R",
                                 global.properties.file=system.file("report","meta-properties.R",package="isobar"),
                                 args=NULL,include.not.localized=FALSE,...) {
-  requireNamespace(ggplot2)
+  requireNamespace("ggplot2")
   if (!exists("properties.env")) {
     properties.env <- load.properties(properties.file,global.properties.file,
                                       args=args,...)
@@ -251,14 +251,14 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 }
 
 .plot.heatmaps.gd <- function(ratio.matrix,variance.matrix,name) {
-  requireNamespace(gplots)
+  requireNamespace("gplots")
   breaks <- seq(from=-max(abs(ratio.matrix)),to=max(abs(ratio.matrix)),length.out=51)
   pdf(sprintf("heatmap_%s.pdf",name),width=15,height=30,title=name)
   min.max <- quantile(ratio.matrix,probs=c(0.0005,0.9995))
   sel <- apply(ratio.matrix<min.max[1] | ratio.matrix > min.max[2],1,any)
   if (sum(sel) > 2) {
     ratio.matrix2 <- ratio.matrix[sel,,drop=FALSE]
-    heatmap.2(ratio.matrix2,Colv=NA,col=greenred(50),dendrogram="row",
+    gplots::heatmap.2(ratio.matrix2,Colv=NA,col=gplots::greenred(50),dendrogram="row",
               margins=c(5,25),main=paste(name,"- above fold change of",round(10^min.max[2],1),
                                 "or below",round(10^min.max[1],1)),
               key=FALSE, keysize=1.0, symkey=FALSE, density.info='none',
@@ -279,7 +279,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
                                                             w=apply(1/variance.matrix,1,median))))
 
   pdf(sprintf("heatmap_correlation_%s.pdf",name),width=15,height=30,title=name)
-  heatmap.2(correlation.matrix,scale="none",Rowv=NA,Colv=NA,col=greenred(50),
+  gplots::heatmap.2(correlation.matrix,scale="none",Rowv=NA,Colv=NA,col=gplots::greenred(50),
             density.info='none',trace="none",cellnote=round(correlation.matrix,1),main="not re")
   dev.off()
 
@@ -287,16 +287,16 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 
 
 .plot.heatmaps <- function(ratio.matrix,normalized.ratio.matrix,variance.matrix,name) {
-  requireNamespace(gplots)
+  requireNamespace("gplots")
   breaks <- seq(from=-max(abs(ratio.matrix)),to=max(abs(ratio.matrix)),length.out=51)
   pdf(sprintf("heatmap_%s.pdf",name),width=15,height=30,title=name)
-  heatmap.2(ratio.matrix,Colv=NA,col=greenred(50),margins=c(5,25),main=paste(name),
+  gplots::heatmap.2(ratio.matrix,Colv=NA,col=gplots::greenred(50),margins=c(5,25),main=paste(name),
 #            labRow=allnames[,"gene_name"],
             lmat=rbind( c(0, 3), c(2,1), c(4,0) ), lhei=c(0.5, 5, 0.5 ),
             scale="none",trace="none",labRow=NA,
             hclustfun=function(c){hclust(c, method='mcquitty')},breaks=breaks)
 
-#  heatmap.2(normalized.ratio.matrix,Colv=NA,col=greenred(50),margins=c(5,25),main=paste(name,"- renormalized"),
+#  gplots::heatmap.2(normalized.ratio.matrix,Colv=NA,col=greenred(50),margins=c(5,25),main=paste(name,"- renormalized"),
  #           labRow=allnames[,"gene_name"],
 #            lmat=rbind( c(0, 3), c(2,1), c(4,0) ), lhei=c(0.5, 5, 0.5 ),scale="none",trace="none",cexCol=0.7,labRow=NA,
 #            hclustfun=function(c){hclust(c, method='mcquitty')},breaks=breaks)
@@ -305,7 +305,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
   sel <- apply(ratio.matrix<min.max[1] | ratio.matrix > min.max[2],1,any)
   if (sum(sel) > 2) {
     ratio.matrix2 <- ratio.matrix[sel,,drop=FALSE]
-    heatmap.2(ratio.matrix2,Colv=NA,col=greenred(50),dendrogram="row",
+    gplots::heatmap.2(ratio.matrix2,Colv=NA,col=gplots::greenred(50),dendrogram="row",
               margins=c(5,25),main=paste(name,"- above fold change of",round(10^min.max[2],1),
                                 "or below",round(10^min.max[1],1)),
               key=FALSE, keysize=1.0, symkey=FALSE, density.info='none',
@@ -326,7 +326,7 @@ create.meta.reports <- function(properties.file="meta-properties.R",
                                                             w=apply(1/variance.matrix,1,median))))
 
   pdf(sprintf("heatmap_correlation_%s.pdf",name),width=7,height=7,title=name)
-  heatmap.2(correlation.matrix,scale="none",Rowv=NA,Colv=NA,col=greenred(50),
+  gplots::heatmap.2(correlation.matrix,scale="none",Rowv=NA,Colv=NA,col=gplots::greenred(50),
             density.info='none',trace="none",cellnote=round(correlation.matrix,1),main="not re")
   dev.off()
 
@@ -342,7 +342,6 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 }
 
 .plot.pairs <- function(ratio.matrix,variance.matrix,name) {
-  requireNamespace(RColorBrewer)
   weights <- apply(1/variance.matrix,1,median)
   weights <- weights/sum(weights)
   
@@ -376,12 +375,13 @@ create.meta.reports <- function(properties.file="meta-properties.R",
 }
 
 .panel.txt <- function(x,y,labels,cex,font,...) {
+  requireNamespace("RColorBrewer")
   ##abc<-c("1"="rep 1","2"="rep 2");
   
   s <- strsplit(labels,".",fixed=TRUE)[[1]]
   u <- par('usr')
   names(u) <- c("xleft", "xright", "ybottom", "ytop")
-  pal <- brewer.pal(8,"Pastel1")
+  pal <- RColorBrewer::brewer.pal(8,"Pastel1")
   bgcolor <- pal[as.numeric(s[[2]])]
   ##bgcolor <- pal[as.numeric(s[[3]])-114]
   do.call(rect, c(col = bgcolor, as.list(u)))

@@ -53,11 +53,11 @@ setAs("IBSpectra","MSnSet",function(from) {
   }
 
   if (is(from,"iTRAQ4plexSpectra")) {
-    reporters <- iTRAQ4
+    reporters <- MSnbase::iTRAQ4
   } else if (is(from,"iTRAQ8plexSpectra")) {
-    reporters <- iTRAQ8
+    reporters <- MSnbase::iTRAQ8
   } else if (is(from,"TMT6plexSpectra")) {
-    reporters <- TMT6
+    reporters <- MSnbase::TMT6
   } else if (is(from,"TMT10plexSpectra")) {
     stop("conversion for TMT10plexSpectra not supported yet")
     #reporters <- TMT10

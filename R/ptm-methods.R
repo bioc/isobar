@@ -323,17 +323,17 @@ writeHscoreData <- function(outfile,ids,massfile="defs.txt") {
 readPhosphoRSOutput <- function(phosphoRS.outfile,simplify=FALSE,pepmodif.sep="##.##",
                                 besthit.only=TRUE) {
   requireNamespace("XML")
-  doc <- xmlTreeParse(phosphoRS.outfile,useInternalNodes=TRUE)  
-  spectra <- xmlRoot(doc)[["Spectra"]]
-  res <- xmlApply(spectra,function(spectrum) {
-    spectrum.id <- URLdecode(xmlAttrs(spectrum)["ID"])
+  doc <- XML::xmlTreeParse(phosphoRS.outfile,useInternalNodes=TRUE)  
+  spectra <- XML::xmlRoot(doc)[["Spectra"]]
+  res <- XML::xmlApply(spectra,function(spectrum) {
+    spectrum.id <- URLdecode(XML::xmlAttrs(spectrum)["ID"])
     #message(spectrum.id)
-    res.s <- xmlApply(spectrum[["Peptides"]],function(peptide) {
-      pep.id <- strsplit(xmlAttrs(peptide)["ID"],pepmodif.sep,fixed=TRUE)[[1]]    
+    res.s <- XML::xmlApply(spectrum[["Peptides"]],function(peptide) {
+      pep.id <- strsplit(XML::xmlAttrs(peptide)["ID"],pepmodif.sep,fixed=TRUE)[[1]]    
       #message(pep.id[1])
-      site.probs <- t(xmlSApply(peptide[["SitePrediction"]],xmlAttrs))
-      isoforms <- t(xmlSApply(peptide[["Isoforms"]],function(isoform) {
-        seqpos <- xmlSApply(isoform[["PhosphoSites"]],xmlGetAttr,"SeqPos")
+      site.probs <- t(XML::xmlSApply(peptide[["SitePrediction"]],XML::xmlAttrs))
+      isoforms <- t(XML::xmlSApply(peptide[["Isoforms"]],function(isoform) {
+        seqpos <- XML::xmlSApply(isoform[["PhosphoSites"]],XML::xmlGetAttr,"SeqPos")
 
         # get right modif string
         modifstring <- strsplit(paste0(pep.id[2]," "),":")[[1]]
@@ -344,8 +344,8 @@ readPhosphoRSOutput <- function(phosphoRS.outfile,simplify=FALSE,pepmodif.sep="#
  
         if (length(seqpos > 1)) seqpos <- paste(seqpos,collapse="&")
         c(modif=modifstring,
-          pepscore=xmlAttrs(isoform)[['PepScore']],
-          pepprob=xmlAttrs(isoform)[['PepProb']],
+          pepscore=XML::xmlAttrs(isoform)[['PepScore']],
+          pepprob=XML::xmlAttrs(isoform)[['PepProb']],
           seqpos=seqpos)
       }))   
 
@@ -373,7 +373,7 @@ readPhosphoRSOutput <- function(phosphoRS.outfile,simplify=FALSE,pepmodif.sep="#
     res$pepprob <- as.numeric(res$pepprob)
     rownames(res) <- NULL
   } else {
-    names(res) <- sapply(xmlChildren(spectra),xmlGetAttr,"ID")
+    names(res) <- sapply(XML::xmlChildren(spectra),XML::xmlGetAttr,"ID")
   }
   if(besthit.only & simplify) {
     res <- ddply(res,'spectrum',function(d) d[which.max(d$pepprob),])

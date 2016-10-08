@@ -15,17 +15,11 @@ if(!isGeneric("as.data.frame")) setGeneric("as.data.frame", useAsDefault=as.data
 }
 
 .gg_theme <- function(...) {
-  if ( compareVersion(packageDescription("ggplot2")$Version,"0.9.1") > 0 )
-    theme(...)
-  else
-    opts(...)
+  theme(...)
 }
 
 .gg_element_text <- function(...) {
-  if ( compareVersion(packageDescription("ggplot2")$Version,"0.9.1") > 0 )
-    element_text(...)
-  else
-    theme_text(...)
+  element_text(...)
 }
 
 .abbrev <- function(strings,n=4,collapse=NULL) {
