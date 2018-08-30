@@ -53,8 +53,9 @@ install the latest stable version available for your version of R, start R and
 enter:
 
 <<eval=FALSE>>=
-source("http://bioconductor.org/biocLite.R")
-biocLite("isobar")
+if (!requireNamespace("BiocManager", quietly=TRUE))
+    install.packages("BiocManager")
+BiocManager::install("isobar")
 @ 
 
 Bioconductor has semi-annual releases, and the releases are tied to

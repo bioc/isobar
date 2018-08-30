@@ -15,8 +15,9 @@ The official Bioconductor version can be found at http://bioconductor.org/packag
 To install isobar from Bioconductor, call
 
     ## try http:// if https:// URLs are not supported
-    source("https://bioconductor.org/biocLite.R")
-    biocLite("isobar")
+    if (!requireNamespace("BiocManager", quietly=TRUE))
+        install.packages("BiocManager")
+    BiocManager::install("isobar")
 
 To install the development version of isobar, the easiest way is using the devtools package:
 
